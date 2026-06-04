@@ -1,0 +1,134 @@
+# ============================================================================
+# AI News Radar - Keyword Filtering Configuration
+# ============================================================================
+
+# High-priority keywords: articles containing these will be boosted in ranking
+high_priority:
+  - claude
+  - anthropic
+  - openai
+  - gpt-5
+  - gpt-4
+  - gemini
+  - llama-3
+  - llama-4
+  - mistral
+  - agi
+  - superintelligence
+  - alignment
+  - constitutional ai
+  - rlhf
+  - red teaming
+  - jailbreak
+  - context window
+  - million tokens
+  - multimodal
+  - agent
+  - autonomous
+  - reasoning
+  - chain of thought
+  - sora
+  - video generation
+  - image generation
+  - code generation
+  - benchmark
+  - state of the art
+  - sota
+  - breakthrough
+
+# Filter keywords: articles MUST contain at least one of these (case-insensitive)
+# Applied to both title and description/text
+filter_keywords:
+  core_ai:
+    - artificial intelligence
+    - machine learning
+    - deep learning
+    - neural network
+    - transformer
+    - foundation model
+    - large language model
+    - generative ai
+    - genai
+    - computer vision
+    - natural language
+    - reinforcement learning
+    - diffusion model
+  
+  models:
+    - gpt
+    - claude
+    - llama
+    - mistral
+    - gemini
+    - falcon
+    - bert
+    - stable diffusion
+    - whisper
+    - dall-e
+    - midjourney
+    - sora
+  
+  tools:
+    - langchain
+    - llamaindex
+    - hugging face
+    - pytorch
+    - tensorflow
+    - jax
+    - vllm
+    - ollama
+  
+  topics:
+    - prompt engineering
+    - rag
+    - retrieval augmented
+    - fine-tuning
+    - lora
+    - quantization
+    - inference
+    - embedding
+    - vector database
+    - agent
+    - tool use
+    - function calling
+
+# Exclude keywords: articles containing these will be filtered out
+# Useful for removing overly generic or non-AI content
+exclude_keywords:
+  - cryptocurrency
+  - bitcoin
+  - ethereum
+  - nft
+  - web3
+  - metaverse
+  - ico
+
+# Category assignment rules (applied after filtering)
+categories:
+  model_release:
+    keywords: [new model, released, launch, announced, introducing, unveiling]
+    label: "🎯 Model Release"
+  
+  research:
+    keywords: [paper, research, study, benchmark, evaluation, arxiv]
+    label: "📄 Research"
+  
+  tool:
+    keywords: [tool, library, framework, open source, github, pip install]
+    label: "🔧 Tool & Framework"
+  
+  safety:
+    keywords: [safety, alignment, jailbreak, red team, bias, ethics, responsible]
+    label: "🛡️ Safety & Ethics"
+  
+  discussion:
+    keywords: [discussion, opinion, hot take, thought, analysis, review]
+    label: "💬 Discussion"
+  
+  tutorial:
+    keywords: [how to, tutorial, guide, learn, course, workshop]
+    label: "📚 Tutorial"
+  
+  industry:
+    keywords: [funding, raised, startup, company, acquisition, partnership]
+    label: "🏭 Industry News"

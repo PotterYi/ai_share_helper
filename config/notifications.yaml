@@ -1,0 +1,56 @@
+# ============================================================================
+# AI News Radar - Notification Configuration
+# ============================================================================
+
+notifications:
+  # Terminal output (always enabled)
+  terminal:
+    enabled: true
+    format: "rich"
+
+  # Telegram Bot notification
+  telegram:
+    enabled: false
+    bot_token: ""          # Set via env: TELEGRAM_BOT_TOKEN
+    chat_id: ""            # Set via env: TELEGRAM_CHAT_ID
+    # What to send
+    on_daily_report: true
+    on_breaking_news: true   # importance >= 0.8
+    max_message_length: 4000
+
+  # Email notification
+  email:
+    enabled: false
+    smtp_host: "smtp.gmail.com"
+    smtp_port: 587
+    smtp_user: ""          # Set via env: EMAIL_USER
+    smtp_password: ""      # Set via env: EMAIL_PASSWORD (App Password)
+    from_address: ""
+    to_address: ""         # Set via env: EMAIL_TO
+    subject_prefix: "[AI News Radar]"
+    send_html: true
+    on_daily_report: true
+    on_breaking_news: false
+
+  # Webhook (can be used with WeChat Work, DingTalk, Lark, etc.)
+  webhook:
+    enabled: false
+    url: ""                # Set via env: WEBHOOK_URL
+    format: "markdown"     # markdown or text
+
+# Report generation schedule
+schedule:
+  daily_report:
+    time: "09:00"          # Send daily digest at 9 AM
+    top_n: 15              # Top N articles in report
+    include_sources: ["anthropic", "github_trending", "hacker_news", "reddit_ml"]
+  
+  breaking_news:
+    check_interval_minutes: 30
+    importance_threshold: 0.8   # Only notify for very important news
+
+  weekly_report:
+    day: "monday"
+    time: "09:00"
+    top_n: 30
+    include_summary: true

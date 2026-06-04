@@ -1,0 +1,130 @@
+# ============================================================================
+# AI News Radar - Information Sources Configuration
+# ============================================================================
+
+sources:
+  anthropic:
+    name: "Anthropic Blog"
+    enabled: true
+    base_url: "https://www.anthropic.com/news"
+    type: blog
+    selector:
+      article_container: "article"
+      title: "h3"
+      link: "a"
+      date: "time"
+      summary: "p"
+    fetch_frequency: "daily"
+    max_articles_per_fetch: 10
+    listing_urls:
+      - "https://www.anthropic.com/news"
+      - "https://www.anthropic.com/research"
+
+  github_trending:
+    name: "GitHub Trending"
+    enabled: true
+    base_url: "https://github.com/trending"
+    type: trending
+    selector:
+      repo_list: "article.Box-row"
+      repo_name: "h2 a"
+      description: "p"
+      language: "[itemprop='programmingLanguage']"
+      stars_today: ".d-inline-block.float-sm-right"
+    fetch_frequency: "every_6_hours"
+    max_articles_per_fetch: 10
+    fallback_url: "https://api.github.com/search/repositories?q=ai+machine+learning+created:>={date}&sort=stars&order=desc"
+    trending_urls:
+      - "https://github.com/trending?since=daily"
+      - "https://github.com/trending/python?since=daily"
+      - "https://github.com/trending?since=weekly"
+    ai_keywords:
+      - ai
+      - ml
+      - llm
+      - gpt
+      - claude
+      - llama
+      - transformer
+      - diffusion
+      - neural
+      - deep-learning
+      - machine-learning
+      - nlp
+      - vision
+      - embedding
+      - rag
+      - agent
+      - prompt
+      - finetune
+      - chatbot
+      - openai
+      - anthropic
+      - langchain
+      - pytorch
+      - tensorflow
+      - huggingface
+      - whisper
+      - stable-diffusion
+      - multimodal
+
+  hacker_news:
+    name: "Hacker News"
+    enabled: true
+    base_url: "https://hacker-news.firebaseio.com/v0"
+    type: api
+    fetch_frequency: "every_4_hours"
+    max_articles_per_fetch: 10
+    top_stories: "/topstories.json"
+    item: "/item/{id}.json"
+    ai_keywords:
+      - ai
+      - artificial intelligence
+      - machine learning
+      - llm
+      - gpt
+      - claude
+      - openai
+      - anthropic
+      - chatbot
+      - transformer
+      - neural network
+      - deep learning
+      - stable diffusion
+      - llama
+      - mistral
+      - gemini
+      - langchain
+      - embedding
+      - rag
+      - agent
+      - prompt
+      - finetune
+      - pytorch
+      - hugging face
+      - nvidia
+      - gpu
+      - cuda
+      - benchmark
+      - safety
+      - alignment
+      - open source
+
+  reddit_ml:
+    name: "Reddit r/MachineLearning"
+    enabled: true
+    base_url: "https://www.reddit.com/r/MachineLearning"
+    type: api
+    fetch_frequency: "every_6_hours"
+    max_articles_per_fetch: 10
+    endpoints:
+      hot: "/hot.json?limit=50"
+      top_day: "/top.json?t=day&limit=25"
+      new: "/new.json?limit=25"
+    related_subreddits:
+      - "LocalLLaMA"
+      - "artificial"
+      - "OpenAI"
+      - "ClaudeAI"
+      - "ChatGPT"
+      - "singularity"
