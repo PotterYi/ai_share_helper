@@ -10,7 +10,7 @@ from typing import Optional
 from .config import get_sources_config, is_configured
 from .database import Database
 from .models import Article, FetchResult, PipelineResult, DailyReport
-from .scrapers import AnthropicBlogScraper, GitHubTrendingScraper, HackerNewsScraper, RedditMLScraper
+from .scrapers import AnthropicBlogScraper, GitHubTrendingScraper, GitHubFastGrowingScraper, HackerNewsScraper, RedditMLScraper
 from .processors.deduplicator import Deduplicator
 from .processors.ai_analyzer import AIAnalyzer
 from .reporters.markdown_report import MarkdownReporter
@@ -22,10 +22,11 @@ logger = logging.getLogger(__name__)
 class Engine:
     """Main orchestration engine for AI News Radar."""
 
-    def __init__(self, db=None, backend="auto", analyze=True, notify=False):
+    def __init__(self, db=None, backend="auto", analyze=True, notify=False, source_filter=None):
         self.db = db or Database()
         self.analyze_enabled = analyze
         self.notify_enabled = notify
+        self.source_filter = source_filter  # None = all, or list of SourceType
 
         if analyze and is_configured():
             self.analyzer = AIAnalyzer(backend=backend)
@@ -74,9 +75,9 @@ class Engine:
         else:
             logger.info("[Phase 3/4] Skipping AI analysis")
 
-        # Phase 4: Generate report
+        # Phase 4: Generate report (only articles from the filtered sources)
         logger.info("[Phase 4/4] Generating report...")
-        today_articles = self.db.get_today_articles(limit=100)
+        today_articles = self.db.get_today_articles(limit=100, source_filter=self.source_filter)
         if today_articles:
             report = self.reporter.generate_daily_report(today_articles, top_n=15)
             self.db.save_report(report)
@@ -121,7 +122,7 @@ class Engine:
 
     async def report_only(self, top_n=15):
         """Only generate a report from existing articles."""
-        today_articles = self.db.get_today_articles(limit=100)
+        today_articles = self.db.get_today_articles(limit=100, source_filter=self.source_filter)
         if not today_articles:
             logger.info("No articles found for today")
             return None
@@ -132,22 +133,28 @@ class Engine:
         return report
 
     async def _scrape_all(self):
-        """Scrape all enabled sources concurrently."""
+        """Scrape all enabled sources, optionally filtered by source_filter."""
         sources_config = get_sources_config()
         scrapers = []
 
-        if sources_config.get("anthropic", {}).get("enabled", True):
-            max_n = sources_config["anthropic"].get("max_articles_per_fetch", 10)
-            scrapers.append(AnthropicBlogScraper(max_articles=max_n))
-        if sources_config.get("github_trending", {}).get("enabled", True):
-            max_n = sources_config["github_trending"].get("max_articles_per_fetch", 10)
-            scrapers.append(GitHubTrendingScraper(max_articles=max_n))
-        if sources_config.get("hacker_news", {}).get("enabled", True):
-            max_n = sources_config["hacker_news"].get("max_articles_per_fetch", 10)
-            scrapers.append(HackerNewsScraper(max_articles=max_n))
-        if sources_config.get("reddit_ml", {}).get("enabled", True):
-            max_n = sources_config["reddit_ml"].get("max_articles_per_fetch", 10)
-            scrapers.append(RedditMLScraper(max_articles=max_n))
+        def _should(source_type_val: str) -> bool:
+            if self.source_filter is None:
+                return True
+            return source_type_val in self.source_filter
+
+        def _max(source_key: str, default: int = 10) -> int:
+            return sources_config.get(source_key, {}).get("max_articles_per_fetch", default)
+
+        if _should("anthropic") and sources_config.get("anthropic", {}).get("enabled", True):
+            scrapers.append(AnthropicBlogScraper(max_articles=_max("anthropic")))
+        if _should("github_trending") and sources_config.get("github_trending", {}).get("enabled", True):
+            scrapers.append(GitHubTrendingScraper(max_articles=_max("github_trending")))
+        if _should("hacker_news") and sources_config.get("hacker_news", {}).get("enabled", True):
+            scrapers.append(HackerNewsScraper(max_articles=_max("hacker_news")))
+        if _should("reddit_ml") and sources_config.get("reddit_ml", {}).get("enabled", True):
+            scrapers.append(RedditMLScraper(max_articles=_max("reddit_ml")))
+        if _should("github_fast_growing") and sources_config.get("github_fast_growing", {}).get("enabled", True):
+            scrapers.append(GitHubFastGrowingScraper(max_articles=_max("github_fast_growing")))
 
         all_articles = []
         for scraper in scrapers:

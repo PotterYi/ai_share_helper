@@ -13,6 +13,7 @@ logger = logging.getLogger(__name__)
 SOURCE_EMOJI = {
     "anthropic": "Anthropic",
     "github_trending": "GitHub",
+    "github_fast_growing": "🚀 GitHub",
     "hacker_news": "HN",
     "reddit_ml": "Reddit",
 }
@@ -50,7 +51,16 @@ class MarkdownReporter:
             source_summary[src] = source_summary.get(src, 0) + 1
 
         today = datetime.now().strftime("%Y-%m-%d")
-        report_title = title or "AI News Radar - Daily Digest (" + today + ")"
+        is_project_mode = (
+            len(source_summary) == 1
+            and "github_fast_growing" in source_summary
+        )
+        if not title:
+            if is_project_mode:
+                title = "🚀 AI News Radar - Fastest-Growing GitHub Projects (" + today + ")"
+            else:
+                title = "AI News Radar - Daily Digest (" + today + ")"
+        report_title = title
 
         content = self._build_report_content(report_title, top_articles, source_summary)
 
@@ -122,6 +132,7 @@ class MarkdownReporter:
         source_names = {
             "anthropic": "Anthropic Blog",
             "github_trending": "GitHub Trending",
+            "github_fast_growing": "🚀 GitHub Fast-Growing",
             "hacker_news": "Hacker News",
             "reddit_ml": "Reddit r/ML",
         }
@@ -140,19 +151,66 @@ class MarkdownReporter:
             "",
         ])
 
+        # Fast-growing GitHub repos section
+        fast_growing = [a for a in articles if a.source_type.value == "github_fast_growing"]
+        if fast_growing:
+            lines.append("### 🚀 Fastest-Growing GitHub Projects")
+            lines.append("")
+            lines.append(
+                "| Repository | Stars | Age | Language | Growth | Description |"
+            )
+            lines.append(
+                "|------------|-------|-----|----------|--------|-------------|"
+            )
+            for repo in fast_growing[:10]:
+                stars = repo.metadata.get("total_stars", 0) or 0
+                age_days = repo.metadata.get("age_days", 999) or 999
+                label = repo.metadata.get("growth_label", "")
+                if isinstance(age_days, int):
+                    if age_days >= 999:
+                        age_str = "?"
+                    elif age_days == 0:
+                        age_str = "today"
+                    elif age_days < 30:
+                        age_str = f"{age_days}d"
+                    elif age_days < 365:
+                        age_str = f"{age_days // 30}m"
+                    else:
+                        age_str = f"{age_days // 365}y"
+                else:
+                    age_str = "?"
+                lang = repo.metadata.get("language", "") or "-"
+                desc = (repo.raw_content or "")[:65]
+                name = repo.title
+                if len(name) > 35:
+                    name = name[:32] + "…"
+                lines.append(
+                    f"| [{name}]({repo.url}) "
+                    f"| {stars:,} "
+                    f"| {age_str} "
+                    f"| {lang} "
+                    f"| {label} "
+                    f"| {desc} |"
+                )
+            lines.append("")
+
         # Top 3 highlighted
-        if len(articles) >= 3:
+        non_fast = [a for a in articles if a.source_type.value != "github_fast_growing"]
+        highlight_target = non_fast if non_fast else articles
+        if len(highlight_target) >= 3:
             lines.append("### Top Stories")
             lines.append("")
-            for i, article in enumerate(articles[:3]):
+            for i, article in enumerate(highlight_target[:3]):
                 lines.extend(self._format_highlighted_article(article, i + 1))
 
-        # Rest as list
-        if len(articles) > 3:
+        # Rest as list (exclude fast-growing repos shown separately)
+        non_fast_list = [a for a in articles if a.source_type.value != "github_fast_growing"]
+        more_news = [a for a in non_fast_list if a not in highlight_target[:3]]
+        if more_news:
             lines.append("")
             lines.append("### More News")
             lines.append("")
-            for article in articles[3:]:
+            for article in more_news:
                 lines.extend(self._format_article(article))
 
         lines.extend([

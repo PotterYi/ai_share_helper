@@ -132,3 +132,26 @@ def time_ago(timestamp):
         return str(days) + 'd ago'
     weeks = days // 7
     return str(weeks) + 'w ago'
+
+
+def normalize_stock_code(code: str) -> str:
+    """Normalize a Chinese stock/ETF code to include exchange prefix.
+
+    Rules:
+      - 6xxxxx → sh (Shanghai A-shares)
+      - 5xxxxx → sh (Shanghai ETFs, e.g. 510300 沪深300ETF)
+      - 1xxxxx → sh (Shanghai bonds/funds)
+      - 0xxxxx → sz (Shenzhen A-shares)
+      - 3xxxxx → sz (Shenzhen ChiNext)
+      - 2xxxxx → sz (Shenzhen small board)
+      - Already prefixed → return as-is
+    """
+    code = code.strip()
+    if code.startswith(("sh", "sz")):
+        return code
+    # Determine exchange based on first digit
+    first_digit = code[0] if code else "0"
+    if first_digit in ("6", "5", "1"):
+        return "sh" + code
+    else:
+        return "sz" + code

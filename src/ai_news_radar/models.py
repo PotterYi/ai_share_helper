@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field, HttpUrl
 class SourceType(str, Enum):
     ANTHROPIC = "anthropic"
     GITHUB_TRENDING = "github_trending"
+    GITHUB_FAST_GROWING = "github_fast_growing"
     HACKER_NEWS = "hacker_news"
     REDDIT_ML = "reddit_ml"
 

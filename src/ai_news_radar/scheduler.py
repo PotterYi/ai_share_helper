@@ -1,5 +1,7 @@
 """
 Task scheduler for periodic news fetching and reporting.
+
+Uses APScheduler for reliable cron-based scheduling.
 """
 
 import asyncio
@@ -9,11 +11,16 @@ import sys
 from datetime import datetime, time
 from typing import Optional, Callable
 
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from apscheduler.triggers.cron import CronTrigger
+from apscheduler.triggers.interval import IntervalTrigger
+from apscheduler.jobstores.memory import MemoryJobStore
+
 logger = logging.getLogger(__name__)
 
 
 class Scheduler:
-    """Schedule periodic news collection and reporting tasks."""
+    """APScheduler-based scheduler for periodic news collection and reporting."""
 
     def __init__(self, engine, daily_time: str = "09:00"):
         """
@@ -23,87 +30,79 @@ class Scheduler:
         """
         self.engine = engine
         self.daily_time = daily_time
-        self._running = False
-        self._tasks: list[asyncio.Task] = []
+        self._scheduler: Optional[AsyncIOScheduler] = None
 
         # Parse daily time
         hour, minute = map(int, daily_time.split(":"))
         self._daily_hour = hour
         self._daily_minute = minute
 
-    async def start(self, scrape_interval_hours: int = 4) -> None:
-        """Start the scheduler with periodic scraping."""
-        self._running = True
+    async def _scrape_job(self):
+        """Run the full scrape pipeline."""
+        logger.info("[APScheduler] Running scheduled scrape...")
+        try:
+            await self.engine.run_full_pipeline()
+            logger.info("[APScheduler] Scrape completed")
+        except Exception as e:
+            logger.error("[APScheduler] Scrape failed: %s", e)
+
+    async def _report_job(self):
+        """Generate daily report."""
+        logger.info("[APScheduler] Generating daily report...")
+        try:
+            await self.engine.report_only()
+            logger.info("[APScheduler] Daily report generated")
+        except Exception as e:
+            logger.error("[APScheduler] Report failed: %s", e)
+
+    def start(self, scrape_interval_hours: int = 4) -> None:
+        """Start the scheduler with APScheduler cron triggers.
+
+        Args:
+            scrape_interval_hours: How often to scrape (in hours).
+        """
         logger.info(
-            "Scheduler started: scrape every %dh, daily report at %s",
+            "Scheduler starting: scrape every %dh, daily report at %s",
             scrape_interval_hours,
             self.daily_time,
         )
 
-        # Setup signal handlers for graceful shutdown
-        loop = asyncio.get_event_loop()
-        for sig in (signal.SIGINT, signal.SIGTERM):
-            try:
-                loop.add_signal_handler(sig, lambda: asyncio.create_task(self.stop()))
-            except NotImplementedError:
-                # Windows doesn't support add_signal_handler
-                pass
+        jobstores = {"default": MemoryJobStore()}
+        self._scheduler = AsyncIOScheduler(jobstores=jobstores, timezone="Asia/Shanghai")
 
-        # Run initial collection immediately
-        logger.info("Running initial collection...")
-        await self.engine.run_full_pipeline()
+        # Scrape job — runs every N hours
+        self._scheduler.add_job(
+            self._scrape_job,
+            trigger=IntervalTrigger(hours=scrape_interval_hours),
+            id="news_scrape",
+            name=f"Scrape news every {scrape_interval_hours}h",
+            replace_existing=True,
+        )
 
-        # Schedule periodic tasks
-        while self._running:
-            now = datetime.now()
+        # Daily report job — runs at specified time
+        self._scheduler.add_job(
+            self._report_job,
+            trigger=CronTrigger(
+                hour=self._daily_hour,
+                minute=self._daily_minute,
+                timezone="Asia/Shanghai",
+            ),
+            id="daily_report",
+            name=f"Daily report @ {self.daily_time}",
+            replace_existing=True,
+            misfire_grace_time=600,
+        )
 
-            # Calculate next scrape time
-            next_scrape = now.replace(
-                hour=(now.hour // scrape_interval_hours + 1) * scrape_interval_hours % 24,
-                minute=0, second=0, microsecond=0,
-            )
-            if next_scrape <= now:
-                next_scrape = now.replace(
-                    hour=((now.hour + scrape_interval_hours) // scrape_interval_hours)
-                    * scrape_interval_hours % 24,
-                    minute=0, second=0, microsecond=0,
-                )
+        self._scheduler.start()
+        logger.info("APScheduler started with %d jobs", len(self._scheduler.get_jobs()))
 
-            # Calculate next daily report time
-            daily_time = now.replace(
-                hour=self._daily_hour, minute=self._daily_minute, second=0, microsecond=0
-            )
-            if daily_time <= now:
-                from datetime import timedelta
-                daily_time += timedelta(days=1)
-
-            # Determine what triggers next
-            next_run = min(next_scrape, daily_time)
-            sleep_seconds = (next_run - now).total_seconds()
-
-            if sleep_seconds > 0:
-                logger.info(
-                    "Next event at %s (%s), sleeping %.0fs...",
-                    next_run.strftime("%H:%M"),
-                    "daily report" if next_run == daily_time else "scrape",
-                    sleep_seconds,
-                )
-                await asyncio.sleep(min(sleep_seconds, 3600))  # Check every hour max
-                continue
-
-            # Execute the appropriate task
-            if now >= daily_time and now < daily_time.replace(minute=daily_time.minute + 1):
-                logger.info("Generating daily report...")
-                await self.engine.report_only()
-            else:
-                logger.info("Running scheduled scrape...")
-                await self.engine.run_full_pipeline()
-
-    async def stop(self) -> None:
+    def stop(self) -> None:
         """Stop the scheduler gracefully."""
-        logger.info("Stopping scheduler...")
-        self._running = False
-        self.engine.close()
+        if self._scheduler and self._scheduler.running:
+            logger.info("Stopping scheduler...")
+            self._scheduler.shutdown(wait=True)
+            self.engine.close()
+            logger.info("Scheduler stopped.")
 
 
 def run_scheduler(
@@ -116,14 +115,31 @@ def run_scheduler(
     """Entry point to run the scheduler (blocking)."""
     from .engine import Engine
 
-    async def _run():
-        engine = Engine(backend=backend, analyze=analyze, notify=notify)
-        scheduler = Scheduler(engine, daily_time=daily_time)
-        try:
-            await scheduler.start(scrape_interval_hours=scrape_interval_hours)
-        except KeyboardInterrupt:
-            logger.info("KeyboardInterrupt received")
-        finally:
-            await scheduler.stop()
+    engine = Engine(backend=backend, analyze=analyze, notify=notify)
+    scheduler = Scheduler(engine, daily_time=daily_time)
 
-    asyncio.run(_run())
+    def _signal_handler():
+        logger.info("Signal received, shutting down...")
+        scheduler.stop()
+        sys.exit(0)
+
+    # Setup signal handlers (not available on Windows)
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    try:
+        for sig in (signal.SIGINT, signal.SIGTERM):
+            try:
+                loop.add_signal_handler(sig, _signal_handler)
+            except NotImplementedError:
+                pass  # Windows
+    except Exception:
+        pass
+
+    try:
+        scheduler.start(scrape_interval_hours=scrape_interval_hours)
+        loop.run_forever()
+    except KeyboardInterrupt:
+        logger.info("KeyboardInterrupt received")
+    finally:
+        scheduler.stop()
+        loop.close()
