@@ -239,6 +239,56 @@ class Database:
                 pass  # Column already exists
         logger.info("Database initialized at %s", self.db_path)
 
+        # ─── Strategy Signal Tracking (十全十美 / 主力捉妖) ────────
+        self._ensure_strategy_tables()
+
+    def _ensure_strategy_tables(self):
+        """Create strategy signal tracking tables."""
+        try:
+            with self._get_conn() as conn:
+                conn.execute(
+                    "CREATE TABLE IF NOT EXISTS strategy_signals ("
+                    "id INTEGER PRIMARY KEY AUTOINCREMENT,"
+                    "strategy_type TEXT NOT NULL,"
+                    "stock_code TEXT NOT NULL,"
+                    "stock_name TEXT NOT NULL DEFAULT '',"
+                    "price REAL NOT NULL,"
+                    "score TEXT DEFAULT '',"
+                    "signal_date TEXT NOT NULL,"
+                    "status TEXT NOT NULL DEFAULT 'active',"
+                    "created_at TEXT NOT NULL DEFAULT (datetime('now')))"
+                )
+                conn.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_signals_strategy ON strategy_signals(strategy_type)"
+                )
+                conn.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_signals_date ON strategy_signals(signal_date)"
+                )
+                conn.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_signals_status ON strategy_signals(status)"
+                )
+                conn.execute(
+                    "CREATE TABLE IF NOT EXISTS strategy_signal_tracking ("
+                    "id INTEGER PRIMARY KEY AUTOINCREMENT,"
+                    "signal_id INTEGER NOT NULL REFERENCES strategy_signals(id) ON DELETE CASCADE,"
+                    "track_date TEXT NOT NULL DEFAULT (date('now')),"
+                    "price REAL NOT NULL,"
+                    "high REAL DEFAULT 0,"
+                    "low REAL DEFAULT 0,"
+                    "change_pct REAL DEFAULT 0,"
+                    "peak_pct REAL DEFAULT 0,"
+                    "drawdown_pct REAL DEFAULT 0,"
+                    "updated_at TEXT NOT NULL DEFAULT (datetime('now')))"
+                )
+                conn.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_tracking_signal ON strategy_signal_tracking(signal_id)"
+                )
+                conn.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_tracking_date ON strategy_signal_tracking(track_date)"
+                )
+        except Exception as e:
+            logger.warning("Strategy tables init error: %s", e)
+
     # --- Source Operations ---
 
     def ensure_source(self, source_type: str, name: str, base_url: str = ""):
@@ -492,6 +542,198 @@ class Database:
                 "articles_today": today,
                 "by_source": by_source,
             }
+
+    # ─── Strategy Signal Tracking ──────────────────────────────────
+
+    def record_strategy_signal(self, strategy_type: str, stock_code: str, stock_name: str,
+                                price: float, score: str = "") -> int:
+        """Record a new strategy signal. Returns signal_id."""
+        with self._get_conn() as conn:
+            today = datetime.now().strftime("%Y-%m-%d")
+            cursor = conn.execute(
+                """INSERT INTO strategy_signals
+                   (strategy_type, stock_code, stock_name, price, score, signal_date)
+                 VALUES (?, ?, ?, ?, ?, ?)""",
+                (strategy_type, stock_code, stock_name, price, score, today),
+            )
+            conn.commit()
+            return cursor.lastrowid
+
+    def get_active_signals(self) -> list[dict]:
+        """Get all active signals (within 60-day tracking window)."""
+        with self._get_conn() as conn:
+            rows = conn.execute(
+                """SELECT * FROM strategy_signals
+                   WHERE status = 'active'
+                     AND signal_date >= date('now', '-60 days')
+                   ORDER BY signal_date DESC, id DESC""",
+            ).fetchall()
+            return [dict(r) for r in rows]
+
+    def get_active_signals_by_strategy(self, strategy_type: str) -> list[dict]:
+        with self._get_conn() as conn:
+            rows = conn.execute(
+                """SELECT * FROM strategy_signals
+                   WHERE strategy_type = ? AND status = 'active'
+                     AND signal_date >= date('now', '-60 days')
+                   ORDER BY signal_date DESC, id DESC""",
+                (strategy_type,),
+            ).fetchall()
+            return [dict(r) for r in rows]
+
+    def update_signal_tracking(self, signal_id: int, price: float,
+                                high: float = 0, low: float = 0,
+                                change_pct: float = 0,
+                                peak_pct: float = 0, drawdown_pct: float = 0) -> bool:
+        """Record today's tracking data for a signal."""
+        with self._get_conn() as conn:
+            today = datetime.now().strftime("%Y-%m-%d")
+            # Upsert: update if today's record exists, insert if not
+            existing = conn.execute(
+                "SELECT id FROM strategy_signal_tracking WHERE signal_id = ? AND track_date = ?",
+                (signal_id, today),
+            ).fetchone()
+            if existing:
+                conn.execute(
+                    """UPDATE strategy_signal_tracking
+                       SET price = ?, high = ?, low = ?, change_pct = ?,
+                           peak_pct = ?, drawdown_pct = ?, updated_at = datetime('now')
+                       WHERE id = ?""",
+                    (price, high, low, change_pct, peak_pct, drawdown_pct, existing["id"]),
+                )
+            else:
+                conn.execute(
+                    """INSERT INTO strategy_signal_tracking
+                       (signal_id, track_date, price, high, low, change_pct, peak_pct, drawdown_pct)
+                     VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (signal_id, today, price, high, low, change_pct, peak_pct, drawdown_pct),
+                )
+            conn.commit()
+            return True
+
+    def get_signal_tracking(self, signal_id: int) -> list[dict]:
+        """Get all tracking records for a signal."""
+        with self._get_conn() as conn:
+            rows = conn.execute(
+                "SELECT * FROM strategy_signal_tracking WHERE signal_id = ? ORDER BY track_date",
+                (signal_id,),
+            ).fetchall()
+            return [dict(r) for r in rows]
+
+    def get_latest_signal_tracking(self, signal_id: int) -> Optional[dict]:
+        """Get the latest tracking record for a signal."""
+        with self._get_conn() as conn:
+            row = conn.execute(
+                "SELECT * FROM strategy_signal_tracking WHERE signal_id = ? ORDER BY track_date DESC LIMIT 1",
+                (signal_id,),
+            ).fetchone()
+            return dict(row) if row else None
+
+    def expire_old_signals(self) -> int:
+        """Mark signals older than 60 days as expired. Returns count expired."""
+        with self._get_conn() as conn:
+            cursor = conn.execute(
+                "UPDATE strategy_signals SET status = 'expired' "
+                "WHERE status = 'active' AND signal_date < date('now', '-60 days')"
+            )
+            conn.commit()
+            return cursor.rowcount
+
+    def get_signal_report(self, strategy_type: Optional[str] = None,
+                           since_days: int = 7) -> dict:
+        """Generate a performance summary for signals within N days."""
+        with self._get_conn() as conn:
+            if strategy_type:
+                rows = conn.execute(
+                    """SELECT s.*, t.price as last_price, t.change_pct, t.peak_pct, t.drawdown_pct
+                       FROM strategy_signals s
+                       LEFT JOIN strategy_signal_tracking t ON t.id = (
+                           SELECT id FROM strategy_signal_tracking
+                           WHERE signal_id = s.id ORDER BY track_date DESC LIMIT 1
+                       )
+                       WHERE s.strategy_type = ? AND s.signal_date >= date('now', ?)
+                       ORDER BY s.signal_date DESC""",
+                    (strategy_type, f'-{since_days} days'),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    """SELECT s.*, t.price as last_price, t.change_pct, t.peak_pct, t.drawdown_pct
+                       FROM strategy_signals s
+                       LEFT JOIN strategy_signal_tracking t ON t.id = (
+                           SELECT id FROM strategy_signal_tracking
+                           WHERE signal_id = s.id ORDER BY track_date DESC LIMIT 1
+                       )
+                       WHERE s.signal_date >= date('now', ?)
+                       ORDER BY s.signal_date DESC""",
+                    (f'-{since_days} days',),
+                ).fetchall()
+            return [dict(r) for r in rows]
+
+    # ─── Database Cleanup ───────────────────────────────────────
+
+    def cleanup_old_data(self) -> dict:
+        """Purge old data to keep the database lean.
+
+        Rules:
+          - Articles > 30 days old (old pipeline data)
+          - Reports > 60 days old
+          - Old wechat_articles and refs > 60 days
+          - strategy_signal_tracking for expired signals
+          - Then VACUUM to reclaim space
+        """
+        stats = {}
+        with self._get_conn() as conn:
+            # Old articles (old pipeline, > 30 days)
+            stats["articles"] = conn.execute(
+                "DELETE FROM articles WHERE fetched_at < datetime('now', '-30 days')"
+            ).rowcount
+
+            # Old reports (> 60 days)
+            stats["reports"] = conn.execute(
+                "DELETE FROM reports WHERE generated_at < datetime('now', '-60 days')"
+            ).rowcount
+
+            # Expire old strategy signals
+            stats["signals_expired"] = conn.execute(
+                "UPDATE strategy_signals SET status = 'expired' "
+                "WHERE status = 'active' AND signal_date < date('now', '-60 days')"
+            ).rowcount
+
+            # Purge tracking details for expired signals
+            stats["tracking_purged"] = conn.execute(
+                "DELETE FROM strategy_signal_tracking WHERE signal_id IN "
+                "(SELECT id FROM strategy_signals WHERE status = 'expired')"
+            ).rowcount
+
+            # Old wechat articles (> 60 days, keep recent for reference)
+            old_ids = conn.execute(
+                "SELECT id FROM wechat_articles WHERE fetched_at < datetime('now', '-60 days')"
+            ).fetchall()
+            old_id_list = [r["id"] for r in old_ids]
+            if old_id_list:
+                placeholders = ",".join("?" for _ in old_id_list)
+                conn.execute(
+                    f"DELETE FROM article_stock_refs WHERE article_id IN ({placeholders})",
+                    old_id_list,
+                )
+                conn.execute(
+                    f"DELETE FROM wechat_articles WHERE id IN ({placeholders})",
+                    old_id_list,
+                )
+            stats["wechat_purged"] = len(old_id_list)
+
+            # VACUUM to reclaim disk space (only if enough was deleted)
+            total_deleted = sum(v for v in stats.values() if isinstance(v, int))
+            if total_deleted > 100:
+                conn.execute("VACUUM")
+                stats["vacuumed"] = True
+            else:
+                stats["vacuumed"] = False
+
+            conn.commit()
+
+        logger.info("Database cleanup: %s", stats)
+        return stats
 
     def close(self) -> None:
         pass  # SQLite connections are auto-closed via context manager

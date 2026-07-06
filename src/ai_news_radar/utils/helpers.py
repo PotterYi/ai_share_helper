@@ -2,6 +2,7 @@
 import hashlib
 import io
 import logging
+import logging.handlers
 import re
 import sys
 from datetime import datetime, timezone
@@ -31,7 +32,10 @@ def setup_logging(name='ai_news_radar', level=None, log_file=None):
         from ..config import LOGS_DIR
         LOGS_DIR.mkdir(parents=True, exist_ok=True)
         log_file = str(LOGS_DIR / 'app.log')
-    fh = logging.FileHandler(log_file, encoding='utf-8')
+    # Rotating file handler: max 1MB per file, keep 3 backups
+    fh = logging.handlers.RotatingFileHandler(
+        log_file, maxBytes=1_048_576, backupCount=3, encoding='utf-8',
+    )
     fh.setLevel(logging.DEBUG)
     file_fmt = '%(asctime)s | %(levelname)-7s | %(name)s | %(funcName)s:%(lineno)d | %(message)s'
     fh.setFormatter(logging.Formatter(file_fmt))

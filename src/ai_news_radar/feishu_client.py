@@ -718,6 +718,84 @@ class FeishuClient:
         content = json.dumps(card, ensure_ascii=False)
         return await self._send_raw_message(chat_id, content)
 
+    async def send_strategy_report_card(self, chat_id: str, report_data: dict) -> bool:
+        """Send a weekly strategy performance report card to group chat.
+
+        Args:
+            chat_id: Feishu group chat_id.
+            report_data: Dict from strategy_tracker.get_weekly_report().
+        """
+        now_str = datetime.now().strftime("%Y-%m-%d %H:%M")
+        overall = report_data.get("overall", {})
+        sqsm = report_data.get("sqsm", {})
+        zlzy = report_data.get("zlzy", {})
+        history = report_data.get("history", {})
+
+        elements = []
+
+        elements.append({"tag": "div", "text": {"tag": "lark_md", "content": f"**{now_str}**"}})
+        elements.append({"tag": "hr"})
+
+        elements.append({"tag": "div", "text": {"tag": "lark_md", "content": "\U0001f4ca **策略回测周报**"}})
+        elements.append({"tag": "hr"})
+
+        # Overall weekly performance
+        lines = ["**\U0001f4c8 本周整体表现**"]
+        lines.append(f"新增信号: {overall.get('total', 0)} 次 (SQSM {sqsm.get('total', 0)} + ZLZY {zlzy.get('total', 0)})")
+        lines.append(f"胜率: {overall.get('win_rate', 0)}% ({overall.get('wins', 0)}/{overall.get('total', 0)} 上涨)")
+        lines.append(f"平均收益: {overall.get('avg_return', 0):+.1f}%")
+        lines.append(f"累计收益: {overall.get('total_return', 0):+.1f}%")
+        elements.append({"tag": "div", "text": {"tag": "lark_md", "content": "\n".join(lines)}})
+
+        elements.append({"tag": "hr"})
+
+        # Best / Worst
+        best = overall.get("best")
+        worst = overall.get("worst")
+        if best and best.get("name"):
+            lines = ["**\U0001f3c6 本周最佳**"]
+            lines.append(f"#{best['name']} ({best['code'][-6:]})  +{best['return']:+.1f}%")
+            elements.append({"tag": "div", "text": {"tag": "lark_md", "content": "\n".join(lines)}})
+        if worst and worst.get("name"):
+            lines = ["**\U0001f4a9 本周最差**"]
+            lines.append(f"#{worst['name']} ({worst['code'][-6:]})  {worst['return']:+.1f}%")
+            elements.append({"tag": "div", "text": {"tag": "lark_md", "content": "\n".join(lines)}})
+
+        elements.append({"tag": "hr"})
+
+        # Strategy breakdown
+        lines = ["**\U0001f3af 各策略表现**"]
+        lines.append(f"十全十美: {sqsm.get('total', 0)}次 | 胜率 {sqsm.get('win_rate', 0)}% | 均收益 {sqsm.get('avg_return', 0):+.1f}%")
+        lines.append(f"主力捉妖: {zlzy.get('total', 0)}次 | 胜率 {zlzy.get('win_rate', 0)}% | 均收益 {zlzy.get('avg_return', 0):+.1f}%")
+        elements.append({"tag": "div", "text": {"tag": "lark_md", "content": "\n".join(lines)}})
+
+        elements.append({"tag": "hr"})
+
+        # All-time history
+        lines = ["**\U0001f4c5 累计表现（全部历史）**"]
+        lines.append(f"总信号: {history.get('total', 0)} 次 | 胜率: {history.get('win_rate', 0)}%")
+        lines.append(f"平均收益: {history.get('avg_return', 0):+.1f}% | 盈亏比: -")
+        elements.append({"tag": "div", "text": {"tag": "lark_md", "content": "\n".join(lines)}})
+
+        elements.append({"tag": "hr"})
+        elements.append({
+            "tag": "note", "elements": [
+                {"tag": "plain_text", "content": f"AI News Radar 策略回测  {now_str}  信号跟踪期60天"}
+            ],
+        })
+
+        card = {
+            "config": {"wide_screen_mode": True},
+            "header": {
+                "title": {"tag": "plain_text", "content": "\U0001f4ca 策略回测周报"},
+                "template": "indigo",
+            },
+            "elements": elements,
+        }
+
+        content = json.dumps(card, ensure_ascii=False)
+        return await self._send_raw_message(chat_id, content)
+
     async def _send_raw_message(self, chat_id: str, content: str) -> bool:
         """Low-level: send an already-serialized card to a group chat."""
         try:

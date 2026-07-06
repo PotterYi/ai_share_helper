@@ -148,6 +148,15 @@ async def run():
 
     fin.sort(key=lambda x: x["mcap"], reverse=True)
     top10 = fin[:_TOP_N]
+
+    # Record signals for strategy tracking
+    for s in top10:
+        try:
+            from ai_news_radar.strategy_tracker import record_signal
+            record_signal("zlzy", s["code"], s["name"], s["price"], s.get("zlzy", ""))
+        except Exception as e:
+            print(f"  [dim]记录信号失败: {e}[/dim]")
+
     from ai_news_radar.feishu_client import FeishuClient
     fc = FeishuClient()
     if fc.is_configured:
