@@ -1,0 +1,250 @@
+# AI News Radar 🚀
+
+AI 驱动的 A 股扫描推荐、技术指标筛选与飞书推送系统。
+
+---
+
+## 📋 功能总览
+
+系统通过 **5 个 Windows 计划任务**自动运行，覆盖技术面选股、持仓分析、公众号跟踪三大场景。
+
+| 时间 | 任务 | 功能 | 运行日 |
+|---|---|---|---|
+| **07:00** | `AI_News_Radar_WeChat` | 公众号股票推荐跟踪 | 📅 每天 |
+| **07:00** | `AI_News_Radar_Morning` | 早间预判 | 📅 周一\~周五 |
+| **15:30** | `AI_News_Radar_Screener_PM` | 十全十美股票推荐 | 📅 周一\~周五 |
+| **15:45** | `AI_News_Radar_ZLZY` | 主力捉妖股票推荐 | 📅 周一\~周五 |
+| **19:00** | `AI_News_Radar_Evening` | 收盘复盘 | 📅 周一\~周五 |
+
+---
+
+## 🔥 核心功能详解
+
+### 1️⃣ 十全十美股票推荐（15:30 推送）
+
+通达信「十全十美」多指标共振系统的 Python 实装。通过对 A 股全市场扫描，筛选出技术面首次共振的个股。
+
+**筛选流水线：**
+
+```
+全市场股票 -> 排除ST/退市
+  -> 成交额>=2亿 -> 取前200名
+  -> 5日涨幅>=7%或涨停
+  -> 流通市值100~1000亿
+  -> SQSM评分>=9/10 且 昨日<9/10(首日共振)
+  -> 推送飞书卡片
+```
+
+**10 个技术指标（通达信公式转 Python）：**
+
+| # | 指标 | 判断逻辑 |
+|---|---|---|
+| 1 | **MACD** | DIFF > DEA（多头） |
+| 2 | **KDJ** | K > D（金叉） |
+| 3 | **RSI** | RSI5 > RSI13（短期强于中期） |
+| 4 | **LWR** | LWR1 > LWR2（威廉指标金叉） |
+| 5 | **BBI** | 收盘价 > 多空线（多头排列） |
+| 6 | **ZLMM** | 短期动量 > 中期动量（动量向上） |
+| 7 | **DBCD** | 异同离差 > 均线（底部背离） |
+| 8 | **CGZ** | 持股线 > 下跌线（趋势向上） |
+| 9 | **ZLGJ** | 主力资金线 > 均线（主力买入） |
+| 10 | **ZJL** | 资金净流入 > 0（资金流入） |
+
+9 分及以上（10 个指标中 ≥9 个满足）定义为 **共振**。系统只推送**今日首次共振**（昨日 < 9 分）的个股。
+
+**公式推导源码：** `src/ai_news_radar/sqsm_indicator.py`
+
+---
+
+### 2️⃣ 主力捉妖股票推荐（15:45 推送）
+
+通达信「主力捉妖」公式的 Python 实装。识别主力资金介入、量价齐升的短线爆发信号。
+
+**筛选流水线：**
+
+```
+全市场股票 -> 排除ST/退市
+  -> 成交额>=2亿 -> 取前1000名
+  -> 5日涨幅>=7%或涨停
+  -> 无市值限制
+  -> ZLZY信号触发 且 昨日未触发(今日首次)
+  -> 推送飞书卡片
+```
+
+**信号触发条件（通达信公式转 Python）：**
+
+| 条件 | 含义 |
+|---|---|
+| **ABC1** | 光头阳线 + 涨幅 > 2.8% + 量能适中 |
+| **量能基础** | 放量 / 短期爆量(换手65~500%) / 庄家吸筹 |
+| **强势区域** | MACD > 0 多头排列 |
+| **FILTER(28)** | 触发后 28 天屏蔽，防重复 |
+
+原通达信公式见 `zlzy.txt`，Python 实现见 `src/ai_news_radar/zlzy_indicator.py`。
+
+---
+
+### 3️⃣ 早间预判 & 收盘复盘（07:00 / 19:00 推送）
+
+基于用户持仓的个性化股票 AI 分析日报，通过飞书私聊推送给每个用户。
+
+**早间预判（07:00）：** 今日关注 + 短期趋势判断 + AI 操作建议 + 关键价位（入场/止损/目标）+ 风险评估
+
+**收盘复盘（19:00）：** 今日行情总结 + 持仓盈亏统计 + 明日策略 + AI 技术分析
+
+**核心代码：** `cli.py check-stocks` → `stock_notifier.py` → `stock_analyzer.py`（DeepSeek API）
+
+---
+
+### 4️⃣ 微信公众号股票推荐跟踪（07:00 推送群聊）
+
+每天定时检查指定公众号的最新文章，提取股票推荐并持续跟踪 15 天。
+
+**流程：** WeWeRSS 检查新文章 → 解析股票代码 → 首日推送卡片（含价格）→ 每日更新跟踪表格
+
+**当前跟踪公众号：** 凡尘一灯、涨公主的后花园
+
+**核心代码：** `scrapers/wechat_article.py` + `scrapers/stock_extractor.py`
+
+---
+
+### 5️⃣ 用户持仓管理
+
+多用户股票持仓管理，通过飞书私聊 + CLI 交互。
+
+```
+ai-news stock 510300              # 添加自选
+ai-news buy 510300 -p 3.95 -q 1000  # 记录买入
+ai-news sell 510300               # 卖出平仓
+ai-news portfolio                 # 查看持仓盈亏
+ai-news watch 510300              # 开启每日监控
+ai-news daily-on                  # 开启日报推送
+```
+
+---
+
+## 📂 项目结构
+
+```
+ai_news_radar/
+├── daily_runner.py              # 定时任务分发入口
+├── run_screener.py              # 十全十美筛选脚本
+├── run_zlzy.py                  # 主力捉妖筛选脚本
+├── create_tasks2.bat            # 一键安装计划任务
+├── zlzy.txt                     # 通达信原公式参考
+├── .env                         # 飞书API密钥配置
+│
+├── src/ai_news_radar/
+│   ├── cli.py                   # 命令行入口（所有命令）
+│   ├── config.py                # 配置加载
+│   ├── database.py              # SQLite数据库
+│   ├── feishu_client.py         # 飞书卡片推送
+│   ├── sqsm_indicator.py        # 十全十美10指标计算
+│   ├── _sqsm_helper.py          # 十全十美子进程
+│   ├── zlzy_indicator.py        # 主力捉妖指标计算
+│   ├── _zlzy_helper.py          # 主力捉妖子进程
+│   ├── _spot_helper.py          # 行情数据子进程
+│   ├── stock_notifier.py        # 股票日报推送
+│   ├── stock_analyzer.py        # AI技术分析
+│   ├── stock_scheduler.py       # 公众号跟踪+计算调度
+│   └── scrapers/
+│       ├── wechat_article.py    # 公众号抓取
+│       └── stock_extractor.py   # 股票代码提取
+│
+├── data/                        # SQLite数据库文件
+└── logs/                        # 运行日志
+```
+
+---
+
+## 🔧 技术架构
+
+### 子进程隔离模式
+
+所有行情数据获取都在独立子进程中执行，主进程不直接调用 akshare，避免其内部的 py_mini_racer（JavaScript 引擎）崩溃影响主流程。
+
+```
+_spot_helper.py  子进程  -> 加载全市场5500+只股票行情
+_sqsm_helper.py  子进程  -> 下载500天K线 + 计算十全十美
+_zlzy_helper.py  子进程  -> 下载500天K线 + 计算主力捉妖
+```
+
+### 腾讯行情 API
+
+使用 `http://ifzq.gtimg.cn/appstock/app/fqkline/get` 纯 JSON 接口，关键字段：
+
+| 字段 | 含义 |
+|---|---|
+| qt[72] | 流通A股（股），流通市值 = 股价 x 流通股 / 1亿 |
+| qt[38] | 换手率（%） |
+| qt[44] | 总市值（亿） |
+
+---
+
+## 💡 数据来源
+
+| 数据类型 | 接口 |
+|---|---|
+| A股实时行情 | akShare + 腾讯API |
+| 历史日K线 | ifzq.gtimg.cn（纯JSON） |
+| 机构龙虎榜 | akShare |
+| 公众号文章 | WeWeRSS |
+| AI分析 | DeepSeek API |
+
+---
+
+## 🚀 部署指南
+
+### 环境要求
+
+- Python >= 3.10
+- Windows 10/11
+- 飞书企业自建应用（App ID / App Secret）
+
+### 安装
+
+```bash
+pip install -e .
+pip install akshare    # 用于机构净买入数据
+```
+
+配置 `.env`，填入 `FEISHU_APP_ID` 和 `FEISHU_APP_SECRET`。
+
+### 安装计划任务
+
+```bash
+# 一键安装
+create_tasks2.bat
+
+# 或手动逐个创建
+schtasks /create /tn "AI_News_Radar_WeChat" /tr "python daily_runner.py wechat_track" /sc daily /st 07:00 /f
+schtasks /create /tn "AI_News_Radar_Morning" /tr "python -m ai_news_radar.cli check-stocks --mode morning" /sc weekly /d MON,TUE,WED,THU,FRI /st 07:00 /f
+schtasks /create /tn "AI_News_Radar_Evening" /tr "python -m ai_news_radar.cli check-stocks --mode evening" /sc weekly /d MON,TUE,WED,THU,FRI /st 19:00 /f
+schtasks /create /tn "AI_News_Radar_Screener_PM" /tr "python daily_runner.py screener_evening" /sc weekly /d MON,TUE,WED,THU,FRI /st 15:30 /f
+schtasks /create /tn "AI_News_Radar_ZLZY" /tr "python daily_runner.py zlzy_evening" /sc weekly /d MON,TUE,WED,THU,FRI /st 15:45 /f
+```
+
+> ⚠️ `python` 需替换为实际 Python 解释器绝对路径
+
+---
+
+## 📖 CLI 命令参考
+
+```bash
+ai-news --help                    # 查看所有命令
+
+# 持仓管理
+ai-news stock 000001              # 添加自选
+ai-news buy 000001 -p 10.5        # 记录买入
+ai-news sell 000001               # 卖出
+ai-news portfolio                 # 查看持仓
+
+# 运行任务
+ai-news check-stocks              # 手动执行日报推送
+ai-news wechat-track              # 手动执行公众号跟踪
+
+# 查询
+ai-news wechat-list               # 近期公众号文章
+ai-news wechat-recommend          # 近期推荐股票汇总
+ai-news sqsm 000001               # 查询十全十美指标
+```

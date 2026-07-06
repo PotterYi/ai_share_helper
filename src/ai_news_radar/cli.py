@@ -16,10 +16,6 @@ from rich.text import Text
 from rich.markdown import Markdown
 
 from . import __version__
-from .engine import Engine
-from .scheduler import run_scheduler
-from .config import is_configured
-from .models import SourceType
 from .utils.helpers import setup_logging, normalize_stock_code
 
 app = typer.Typer(
@@ -53,6 +49,10 @@ def run(
     """📰 AI News: scrape news + trending repos + analyze + report."""
     _print_banner()
 
+    # Lazy import for old pipeline (keeps stock commands independent)
+    from .config import is_configured
+    from .models import SourceType
+
     if analyze and not is_configured():
         console.print(
             "[yellow]Warning: No API key configured. AI analysis will be disabled.[/yellow]"
@@ -63,6 +63,7 @@ def run(
         analyze = False
 
     # News mode: exclude fast-growing projects (they have their own command)
+    from .engine import Engine
     news_sources = [
         SourceType.ANTHROPIC.value,
         SourceType.GITHUB_TRENDING.value,
@@ -96,6 +97,11 @@ def projects(
     """🚀 GitHub Projects: find fast-growing AI/ML repositories."""
     _print_banner()
     console.print("[cyan]🚀 GitHub Fast-Growing Projects mode[/cyan]\n")
+
+    # Lazy import for old pipeline
+    from .config import is_configured
+    from .models import SourceType
+    from .engine import Engine
 
     if analyze and not is_configured():
         console.print(
@@ -968,6 +974,15 @@ def schedule_stocks(
     dry_run: bool = typer.Option(False, "--dry-run", "-d", help="仅打印不发送"),
 ):
     """⏰ 启动定时股票日报推送 + 公众号跟踪（APScheduler）"""
+    # 检测 Windows 计划任务, 防止重复触发
+    import subprocess as _sp
+    _check = _sp.run('schtasks /query /fo CSV', shell=True, capture_output=True, text=True)
+    if 'AI_News_Radar_Morning' in _check.stdout:
+        console.print("[red]检测到 Windows 计划任务已存在! [/red]")
+        console.print("[red]勿重复运行 schedule-stocks, 否则会重复推送. [/red]")
+        console.print("[yellow]请用任务计划程序管理: AI_News_Radar_* [/yellow]")
+        return
+
     from .stock_scheduler import StockScheduler
 
     scheduler = StockScheduler(
@@ -1030,16 +1045,6 @@ def wechat_track(
         db = Database()
         spot_data = _load_akshare_spot_data()
 
-        # Record which article IDs already existed BEFORE this run
-        existing_article_ids = set()
-        for acc in accounts:
-            articles = db.get_wechat_articles(account=acc, limit=20)
-            for a in articles:
-                existing_article_ids.add(a["id"])
-
-        # IDs of articles newly fetched in Step 1
-        newly_fetched_ids = set()
-
         account_sections = []
         tracking_dict = {}
 
@@ -1048,13 +1053,12 @@ def wechat_track(
             if not latest:
                 continue
             title = latest.get("title", "")
+            aid = latest["id"]
+            is_analyzed = latest.get("is_analyzed", 0)
 
-            # Newly fetched = article ID not in existing set
-            is_newly_fetched = latest["id"] not in existing_article_ids
-
-            if is_newly_fetched:
-                newly_fetched_ids.add(latest["id"])
-                refs = db.get_article_stock_refs(article_id=latest["id"])
+            # 用 is_analyzed 判断: 0=未分析(需要发卡), 1=已分析(发过卡了)
+            if is_analyzed == 0:
+                refs = db.get_article_stock_refs(article_id=aid)
                 sections = {}
                 for r in refs:
                     if not _is_valid_stock(r["stock_code"]): continue
@@ -1063,13 +1067,14 @@ def wechat_track(
                     sec = r.get("section", "") or "其他"
                     sections.setdefault(sec, []).append({
                         "code": r["stock_code"],
-                        "name": r.get("stock_full_name","") or r.get("stock_name","") or r["stock_code"][:10],
+                        "name": sd.get("name","") or r.get("stock_name","") or r["stock_code"][:10],
                         "price": sd.get("price",0), "high": sd.get("high",0), "low": sd.get("low",0),
                     })
-                status = "new" if sections else "analyzed"
-                account_sections.append((acc, status, title, sections))
+                status = "new" if sections else "no_stocks"
             else:
-                account_sections.append((acc, "analyzed", title, {}))
+                sections = {}
+                status = "analyzed"
+            account_sections.append((acc, status, title, sections))
 
             for t in db.get_active_tracked_stocks(source_account=acc):
                 if not _is_valid_stock(t["stock_code"]): continue
@@ -1090,7 +1095,7 @@ def wechat_track(
                 if c not in tracking_dict or sd.get("amount",0) > tracking_dict[c].get("amount",0):
                     track_day = int(t.get("track_day", 0)) + 1
                     tracking_dict[c] = {
-                        "name": t.get("stock_name","") or c[:10],
+                        "name": sd.get("name","") or t.get("stock_name","") or c[:10],
                         "price": cur,
                         "day1_price": d1p,
                         "amount": sd.get("amount",0),
@@ -1100,21 +1105,26 @@ def wechat_track(
 
         db.close()
 
-        # Compute 十全十美 scores
+        # Compute 十全十美 scores (异常不影响卡片发送)
         if tracking_dict:
-            from .stock_scheduler import _compute_sqsm_scores
-            console.print(f"  [cyan]计算十全十美指标 ({len(tracking_dict)}只)...[/cyan]")
-            sqsm_scores = await _compute_sqsm_scores(list(tracking_dict.keys()), spot_data)
-            for code, s_data in tracking_dict.items():
-                sqsm = sqsm_scores.get(code, {})
-                s_data["sqsm_score"] = sqsm.get("bull_ratio", "-/-")
-                s_data["sqsm_resonance"] = sqsm.get("total", 0) > 6
+            try:
+                from .stock_scheduler import _compute_sqsm_scores
+                console.print(f"  [cyan]计算十全十美指标 ({len(tracking_dict)}只)...[/cyan]")
+                sqsm_scores = await _compute_sqsm_scores(list(tracking_dict.keys()), spot_data)
+                for code, s_data in tracking_dict.items():
+                    sqsm = sqsm_scores.get(code, {})
+                    s_data["sqsm_score"] = sqsm.get("bull_ratio", "-/-")
+                    s_data["sqsm_resonance"] = sqsm.get("total", 0) > 8  # 9分及以上共振
+            except Exception:
+                console.print(f"  [red]十全十美计算出错，跳过指标显示[/red]")
 
         sorted_tracking = sorted(tracking_dict.values(), key=lambda x: x.get("amount",0), reverse=True)[:10]
         total_tracking = len(tracking_dict)
 
         new_count = sum(1 for _,s,_,_ in account_sections if s == "new")
-        console.print(f"  新文章: {new_count}, 已分析: {len(account_sections)-new_count} 只")
+        no_stock_count = sum(1 for _,s,_,_ in account_sections if s == "no_stocks")
+        analyzed_count = sum(1 for _,s,_,_ in account_sections if s == "analyzed")
+        console.print(f"  新文章: {new_count}, 无有效股票: {no_stock_count}, 已分析: {analyzed_count}")
         console.print(f"  持续跟踪: {total_tracking} 只")
         console.print()
 
@@ -1134,11 +1144,7 @@ def wechat_track(
             tracking_data=sorted_tracking,
             total_tracking=total_tracking,
         )
-        if ok:
-            console.print(f"[green]✅ 美化日报已推送到群[/green]")
-        else:
-            console.print(f"[red]❌ 推送失败[/red]")
-
+        if ok:            console.print(f"[green]✅ 美化日报已推送到群[/green]")        else:            console.print(f"[red]❌ 推送失败[/red]")
         console.print()
         console.print("[dim]每天早上 07:00 自动执行全部公众号检查并推送到群[/dim]")
 
@@ -1151,6 +1157,7 @@ def wechat_track(
 @app.command()
 def scrape():
     """Only scrape news feeds, skip analysis and reporting."""
+    from .engine import Engine
     engine = Engine(analyze=False, notify=False)
 
     async def _scrape():
@@ -1169,6 +1176,7 @@ def analyze(
     backend: str = typer.Option("auto", help="AI backend: deepseek, openai, anthropic, or auto"),
 ):
     """Analyze unprocessed articles using AI."""
+    from .engine import Engine
     engine = Engine(backend=backend, analyze=True)
 
     async def _analyze():
@@ -1188,6 +1196,7 @@ def digest(
     output: Optional[str] = typer.Option(None, help="Save report to file"),
 ):
     """Generate a news digest from today's articles."""
+    from .engine import Engine
     engine = Engine(analyze=False, notify=notify)
 
     async def _digest():
@@ -1474,6 +1483,7 @@ def schedule(
     )
     console.print("[dim]Press Ctrl+C to stop[/dim]")
 
+    from .scheduler import run_scheduler
     run_scheduler(
         backend=backend,
         analyze=analyze,

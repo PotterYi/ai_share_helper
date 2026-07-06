@@ -88,12 +88,16 @@ def _get_realtime_price(symbol: str) -> dict:
     """Get realtime stock/ETF quote from AKShare."""
     import akshare as ak
 
-    # Try A-share spot table first (code may have sh/sz prefix, strip it)
+    # Try A-share spot table first
     try:
         import math
         df = ak.stock_zh_a_spot()
-        plain_code = symbol.replace("sh", "").replace("sz", "")
-        row = df[df["代码"] == plain_code]
+        # AKShare 代码列带 sh/sz/bj 前缀（如 "sh600589"、"sz002196"）
+        row = df[df["代码"] == symbol]
+        if row.empty:
+            # 回退: 可能某些接口返回无前缀格式
+            plain = symbol.replace("sh", "").replace("sz", "").replace("bj", "")
+            row = df[df["代码"] == plain]
         if not row.empty:
             r = row.iloc[0]
             price = float(r["最新价"])

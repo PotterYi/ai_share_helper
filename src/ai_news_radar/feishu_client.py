@@ -220,7 +220,7 @@ class FeishuClient:
             # Stock header with P&L
             pnl = s.get("pnl", 0)
             arrow = "\U0001f4c8" if pnl >= 0 else "\U0001f4c9"
-            pnl_color = "\U0001f7e2" if pnl >= 0 else "\U0001f534"
+            pnl_color = "\U0001f534" if pnl >= 0 else "\U0001f7e2"
             name = s.get("name", "")
             code = s.get("code", "")
             price = s.get("current_price", 0)
@@ -234,9 +234,10 @@ class FeishuClient:
 
             # Price info line
             if buy_price and price:
+                change_color = "🔴" if change >= 0 else "🟢"
                 ch_str = f"{change:+.1f}%" if change else "-"
                 pnl_str = f"{pnl_color} ¥{pnl:+.0f}" if qty > 0 else ""
-                price_info = f"  买入 {buy_price:.2f} → 现在 {price:.2f}  {ch_str}"
+                price_info = f"  买入 {buy_price:.2f} → 现在 {price:.2f}  {change_color} {ch_str}"
                 if pnl_str:
                     price_info += f"  {pnl_str}"
             else:
@@ -321,7 +322,7 @@ class FeishuClient:
 
         # Total P&L
         if total_pnl != 0:
-            summary_icon = "\U0001f7e2" if total_pnl >= 0 else "\U0001f534"
+            summary_icon = "\U0001f534" if total_pnl >= 0 else "\U0001f7e2"
             elements.append({
                 "tag": "div",
                 "text": {"tag": "lark_md", "content": f"{summary_icon} **总盈亏: ¥{total_pnl:+.0f}**"},
@@ -513,8 +514,12 @@ class FeishuClient:
                                 {"tag": "column", "width": "weighted", "weight": 1, "elements": [{"tag": "div", "text": {"tag": "lark_md", "content": lo}}]},
                             ],
                         })
+            elif status == "no_stocks":
+                # 新文章但无有效股票
+                elements.append({"tag": "div", "text": {"tag": "lark_md", "content": f"\U0001f4c4 **最新文章：** {title[:40]}"}})
+                elements.append({"tag": "div", "text": {"tag": "lark_md", "content": "📭 该文章不包含有效新增股票"}})
             else:
-                # Already analyzed
+                # Already analyzed (卡片已发过)
                 elements.append({"tag": "div", "text": {"tag": "lark_md", "content": f"\U0001f4c4 **最新文章：** {title[:40]}"}})
                 elements.append({"tag": "div", "text": {"tag": "lark_md", "content": "✅ 该文章已分析，无新增股票"}})
 
@@ -539,7 +544,7 @@ class FeishuClient:
                 d1p = s.get('day1_price')
                 if d1p and d1p > 0 and cur > 0:
                     ch = (cur - d1p) / d1p * 100
-                    ct = f"\U0001f7e2 +{ch:.1f}%" if ch >= 0 else f"\U0001f534 {ch:.1f}%"
+                    ct = f"\U0001f534 +{ch:.1f}%" if ch >= 0 else f"\U0001f7e2 {ch:.1f}%"
                 else:
                     ct = "-"
                 d1s = f"{d1p:.2f}" if d1p else "-"
@@ -644,6 +649,68 @@ class FeishuClient:
             "header": {
                 "title": {"tag": "plain_text", "content": "\U0001f4ca 十全十美股票推荐"},
                 "template": "blue",
+            },
+            "elements": elements,
+        }
+
+        content = json.dumps(card, ensure_ascii=False)
+        return await self._send_raw_message(chat_id, content)
+
+    async def send_zlzy_card(self, chat_id: str, zlzy_data: list) -> bool:
+        """Send a beautiful card for 主力作妖 stock screener results.
+
+        Args:
+            chat_id: Feishu group chat_id.
+            zlzy_data: List of dicts with keys:
+                name, code, mcap, trn, ch5d, zlzy
+        """
+        now_str = datetime.now().strftime("%Y-%m-%d %H:%M")
+
+        elements = []
+
+        elements.append({"tag": "div", "text": {"tag": "lark_md", "content": f"**{now_str}**"}})
+        elements.append({"tag": "hr"})
+
+        elements.append({"tag": "div", "text": {"tag": "lark_md", "content": "\U0001f47b **主力作妖股票推荐（早间筛选）**"}})
+        elements.append({"tag": "div", "text": {"tag": "lark_md", "content": "无市值条件筛选  |  5日内有涨停或>7%  |  主力作妖信号触发"}})
+        elements.append({"tag": "hr"})
+
+        if not zlzy_data:
+            elements.append({"tag": "div", "text": {"tag": "lark_md", "content": "今日无符合条件的主力作妖推荐股票"}})
+        else:
+            for i, s in enumerate(zlzy_data, 1):
+                name_display = s.get("name", "")[:8]
+                code_display = s.get("code", "")
+                mcap = f"{s.get('mcap', 0):.0f}亿"
+                trn = f"{s.get('trn', 0):.1f}%"
+                ch5 = float(s.get('ch5d', 0))
+                ch5_str = f"{ch5:+.1f}%"
+                zlzy_sig = s.get("zlzy", "-")
+                inst = s.get("jnst", "-")
+                peak_day = str(s.get("peak_day", ""))[-5:]
+                peak_ch = s.get("peak_change", 0)
+                peak_str = f"{peak_day} +{peak_ch:.1f}%" if peak_day and peak_ch > 0 else ""
+
+                lines = []
+                lines.append(f"\U0001f7e2 **#{i} {name_display}** ({code_display[-6:]})")
+                lines.append(f"\U0001f4b0 市值{mcap}  |  \U0001f504 换手{trn}  |  \U0001f47b作妖:{zlzy_sig}")
+                lines.append(f"\U0001f4c8 5日累积: {ch5_str}" + (f"  (峰值 {peak_str})" if peak_str else ""))
+                lines.append(f"\U0001f3c6 机构: {inst}")
+
+                elements.append({"tag": "div", "text": {"tag": "lark_md", "content": "\n".join(lines)}})
+
+        elements.append({"tag": "hr"})
+        elements.append({
+            "tag": "note", "elements": [
+                {"tag": "plain_text", "content": f"AI News Radar 自动筛选 {now_str}  共{len(zlzy_data)}只推荐"}
+            ],
+        })
+
+        card = {
+            "config": {"wide_screen_mode": True},
+            "header": {
+                "title": {"tag": "plain_text", "content": "\U0001f47b 主力作妖股票推荐"},
+                "template": "purple",
             },
             "elements": elements,
         }

@@ -1,6 +1,6 @@
 """
 十全十美股票推荐 - 每日A股扫描筛选系统
-每天 09:45 (早间·盘中实时估算) / 19:30 (晚间·收盘数据) 执行筛选并推送群通知
+每天 19:30 (晚间·收盘数据) 执行筛选并推送群通知
 """
 import asyncio, logging, numpy as np, time
 from datetime import datetime, timedelta
@@ -292,9 +292,11 @@ async def run_daily_screener(mode: str = "morning"):
             raw_code = s["code"].replace("sh", "").replace("sz", "")
             net = inst_data.get(raw_code, 0)
             if abs(net) >= 100000000:
-                s["jnst"] = f"{'🟢' if net>0 else '🔴'}¥{abs(net)/100000000:.1f}亿"
+                tag = "净买" if net > 0 else "净卖"
+                s["jnst"] = f"{tag}¥{abs(net)/100000000:.1f}亿"
             elif abs(net) >= 1000000:
-                s["jnst"] = f"{'🟢' if net>0 else '🔴'}¥{abs(net)/10000:.0f}万"
+                tag = "净买" if net > 0 else "净卖"
+                s["jnst"] = f"{tag}¥{abs(net)/10000:.0f}万"
             else:
                 s["jnst"] = "-"
 

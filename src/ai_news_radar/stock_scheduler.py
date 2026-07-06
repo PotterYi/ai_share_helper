@@ -86,7 +86,16 @@ class StockScheduler:
     WECHAT_ACCOUNTS = ["凡尘一灯", "涨公主的后花园"]
 
     async def _wechat_morning_job(self):
-        """Execute WeChat daily check, then send beautiful interactive card."""
+        """Execute WeChat daily check, then send beautiful interactive card.
+
+        工作流:
+          1. 07:00 WeWeRSS 检查 → 新文章入库(is_analyzed=0), 提取股票引用
+          2. 卡片构建 → 根据 is_analyzed 判断:
+               is_analyzed=0 + 有有效股票 → "new" → 发卡 → 标记 is_analyzed=1
+               is_analyzed=0 + 无有效股票 → "no_stocks" → 发卡 → 标记 is_analyzed=1
+               is_analyzed=1           → "analyzed" (卡片已发过)
+          3. 持续跟踪数据(无论文章状态, 每天更新)
+        """
         from ..scrapers.wechat_article import (
             check_for_new_article, fetch_and_save, _load_akshare_spot_data, _is_valid_stock,
         )
@@ -98,54 +107,47 @@ class StockScheduler:
         logger.info("[APScheduler] Starting %s for %d accounts...", label, len(self.WECHAT_ACCOUNTS))
         print(f"\n[cyan]{dt.now().strftime('%H:%M')}  开始{label}[/cyan]")
 
-        new_article_found = {}  # account -> True/False (truly new, just fetched)
-
-        # Record existing article IDs before checking
-        existing_ids = set()
-        db_pre = Database()
-        for acct in self.WECHAT_ACCOUNTS:
-            arts = db_pre.get_wechat_articles(account=acct, limit=5)
-            for a in arts:
-                existing_ids.add(a["id"])
-        db_pre.close()
-
-        # Step 1: Check for new articles
+        # Step 1: WeWeRSS 检查 → 新文章入库 (is_analyzed=0)
+        newly_fetched_ids = set()
         for account in self.WECHAT_ACCOUNTS:
             print(f"  [dim]📱 {account}...[/dim]")
             try:
                 new_article = await check_for_new_article(account=account)
                 if new_article:
                     if new_article.get("already_saved"):
-                        new_article_found[account] = False
-                        print(f"  [green]  {account}: 已有今日文章 \"{new_article.get('title', '')[:30]}\"[/green]")
+                        print(f"  [dim]  {account}: 已有今日文章 \"{new_article.get('title', '')[:30]}\"[/dim]")
                     else:
                         save_result = await fetch_and_save(new_article["url"], account=account)
-                        new_article_found[account] = True
+                        newly_fetched_ids.add(save_result.get("article_id", 0))
                         print(f"  [green]  {account}: 新文章 \"{save_result.get('title', '')[:30]}\"[/green]")
                         print(f"  [green]  识别到 {save_result.get('stocks_found', 0)} 只股票[/green]")
                 else:
-                    new_article_found[account] = False
                     print(f"  [dim]  {account}: 无新文章[/dim]")
             except Exception as e:
-                logger.error("[APScheduler] %s new-article check failed for %s: %s", label, account, e)
-                new_article_found[account] = False
+                logger.error("[APScheduler] %s check failed for %s: %s", label, account, e)
                 print(f"  [red]  {account}: 检查出错 — {e}[/red]")
 
-        # Step 2: Build structured data for the card
+        # Step 2: 构建卡片
         print(f"  [cyan]构建卡片数据...[/cyan]")
         db = Database()
         spot_data = _load_akshare_spot_data()
 
-        account_sections = []  # [(account, status, title?, sections?)]
+        account_sections = []  # [(account, status, title, sections)]
         tracking_dict = {}
+        articles_to_mark_analyzed = []  # 发卡后标记已分析的article_id列表
 
         for account in self.WECHAT_ACCOUNTS:
-            has_new = new_article_found.get(account, False)
             latest = db.get_latest_wechat_article(account)
-            title = latest["title"] if latest else ""
+            if not latest:
+                continue
+            title = latest.get("title", "")
+            aid = latest["id"]
+            is_analyzed = latest.get("is_analyzed", 0)
 
-            if has_new and latest:
-                refs = db.get_article_stock_refs(article_id=latest["id"])
+            # 判断状态
+            if is_analyzed == 0:
+                # 未分析的新文章 → 检查是否有有效股票
+                refs = db.get_article_stock_refs(article_id=aid)
                 sections = {}
                 for r in refs:
                     if not _is_valid_stock(r["stock_code"]):
@@ -154,17 +156,27 @@ class StockScheduler:
                     if not sd:
                         continue
                     sec = r.get("section", "") or "其他"
+                    # 用 spot_data 中的真实名称（从AKShare获取），不用文章提取的可能乱码的名称
+                    real_name = sd.get("name", "")
                     sections.setdefault(sec, []).append({
                         "code": r["stock_code"],
-                        "name": r.get("stock_full_name", "") or r.get("stock_name", "") or r["stock_code"][:10],
+                        "name": real_name or r.get("stock_name", "") or r["stock_code"][:10],
                         "price": sd.get("price", 0),
                         "high": sd.get("high", 0),
                         "low": sd.get("low", 0),
                     })
-                account_sections.append((account, "new", title, sections))
-            elif title:
+                if sections:
+                    status = "new"
+                    articles_to_mark_analyzed.append(aid)
+                else:
+                    status = "no_stocks"
+                    articles_to_mark_analyzed.append(aid)
+                account_sections.append((account, status, title, sections))
+            else:
+                # 已分析（卡片已发过）
                 account_sections.append((account, "analyzed", title, {}))
 
+            # 持续跟踪数据（无论文章是否已分析, 每天更新）
             for t in db.get_active_tracked_stocks(source_account=account):
                 if not _is_valid_stock(t["stock_code"]):
                     continue
@@ -175,7 +187,6 @@ class StockScheduler:
                 d1p = t.get("day1_price")
                 cur = sd.get("price", 0)
 
-                # Capture Day1 data if not yet set
                 if not d1p and cur > 0:
                     db.update_tracking_daily_data(
                         stock_code=c, source_account=account,
@@ -187,7 +198,7 @@ class StockScheduler:
                     track_day = int(t.get("track_day", 0)) + 1
                     tracking_dict[c] = {
                         "code": c,
-                        "name": t.get("stock_name", "") or c[:10],
+                        "name": sd.get("name", "") or t.get("stock_name", "") or c[:10],
                         "price": cur,
                         "day1_price": d1p,
                         "amount": sd.get("amount", 0),
@@ -204,7 +215,7 @@ class StockScheduler:
             for code, s_data in tracking_dict.items():
                 sqsm = sqsm_scores.get(code, {})
                 s_data["sqsm_score"] = sqsm.get("bull_ratio", "-/-")
-                s_data["sqsm_resonance"] = sqsm.get("total", 0) > 6
+                s_data["sqsm_resonance"] = sqsm.get("total", 0) > 8  # 9分及以上共振
 
         # Sort tracking by amount, take top 10
         sorted_tracking = sorted(tracking_dict.values(), key=lambda x: x.get("amount", 0), reverse=True)[:10]
@@ -215,11 +226,14 @@ class StockScheduler:
             return
 
         # Step 3: Send beautiful card
+        card_sent = False
         if self.dry_run:
             print(f"\n  [dim]DRY RUN - 账户={len(account_sections)}, 跟踪={total_tracking}只[/dim]")
             new_count = sum(1 for _, s, _, _ in account_sections if s == "new")
-            print(f"  新文章={new_count}, 已分析={len(account_sections)-new_count}")
+            no_stock_count = sum(1 for _, s, _, _ in account_sections if s == "no_stocks")
+            print(f"  新文章={new_count}, 无股票={no_stock_count}, 已分析={len(account_sections)-new_count-no_stock_count}")
             print(f"  持续跟踪表格: {len(sorted_tracking)} 只")
+            card_sent = True  # dry-run 也视为已处理
         else:
             fc = FeishuClient()
             if fc.is_configured:
@@ -231,10 +245,21 @@ class StockScheduler:
                 )
                 if ok:
                     print(f"  [green]✅ 美化日报已推送到群[/green]")
+                    card_sent = True
                 else:
                     print(f"  [red]❌ 推送失败[/red]")
             else:
                 print(f"  [red]❌ 飞书未配置[/red]")
+
+        # 卡片发送成功后, 标记未分析的文章为已分析(is_analyzed=1)
+        if card_sent and articles_to_mark_analyzed:
+            from ..database import Database
+            db_mark = Database()
+            for aid in articles_to_mark_analyzed:
+                db_mark.mark_wechat_analyzed(aid)
+                logger.info("[APScheduler] Marked article %d as analyzed", aid)
+            db_mark.close()
+            print(f"  [dim]已标记 {len(articles_to_mark_analyzed)} 篇文章为已分析[/dim]")
 
         logger.info("[APScheduler] %s done: %d accounts, %d tracking", label, len(self.WECHAT_ACCOUNTS), total_tracking)
 
@@ -278,30 +303,6 @@ class StockScheduler:
             "[APScheduler] %s done: notified=%d errors=%d",
             mode_label, result.get("notified", 0), len(result.get("errors", [])),
         )
-
-    async def _screener_morning_job(self):
-        from ..stock_screener import run_daily_screener, format_report
-        from ..feishu_client import FeishuClient
-        label = "十全十美早间筛选"
-        logger.info("[APScheduler] Starting %s...", label)
-        print(f"\n[cyan]{datetime.now().strftime('%H:%M')}  开始{label}[/cyan]")
-        try:
-            top10 = await run_daily_screener(mode="morning")
-            if self.dry_run:
-                print(format_report(top10, mode="morning"))
-                return
-            fc = FeishuClient()
-            if fc.is_configured:
-                ok = await fc.send_screener_card(chat_id="oc_8792267760e09f7c142bb0157bcf22f0", screener_data=top10)
-                print(f"  {'[green]✅ 早间推荐已推送[/green]' if ok else '[red]❌ 推送失败[/red]'}")
-            else:
-                print("  [red]❌ 飞书未配置[/red]")
-            logger.info("[APScheduler] %s done: %d stocks", label, len(top10))
-        except Exception as e:
-            logger.error("[APScheduler] %s failed: %s", label, e)
-            import traceback
-            print(f"  [red]出错: {e}[/red]")
-            traceback.print_exc()
 
     async def _screener_evening_job(self):
         from ..stock_screener import run_daily_screener, format_report
@@ -365,19 +366,7 @@ class StockScheduler:
             misfire_grace_time=300,
         )
 
-        # Add 十全十美 stock screener morning job (09:45 — after market opens, uses real-time data)
-        self._scheduler.add_job(
-            self._screener_morning_job,
-            trigger=CronTrigger(
-                hour=9, minute=45, timezone="Asia/Shanghai",
-            ),
-            id="sqsm_screener_morning",
-            name="十全十美 morning screener @ 09:45",
-            replace_existing=True,
-            misfire_grace_time=600,
-        )
-
-        # Add 十全十美 stock screener evening job (19:30)
+        # Add 十全十美 stock screener evening job (19:30) — 仅盘后推送，早间不推送
         self._scheduler.add_job(
             self._screener_evening_job,
             trigger=CronTrigger(

@@ -333,7 +333,7 @@ async def check_for_new_article(account: str = "凡尘一灯") -> Optional[dict]
 
 _TRACK_DAYS = 15
 
-_SKIP_CODES = {"066062", "511003", "0034", "021062", "510002", "510020"}
+_SKIP_CODES = {"066062", "511003", "0034", "021062", "510002", "510020", "000000"}
 
 
 def _is_valid_stock(code: str) -> bool:

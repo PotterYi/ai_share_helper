@@ -4,15 +4,17 @@ __pycache__/
 *$py.class
 *.so
 *.egg-info/
+*.egg
 dist/
 build/
 eggs/
 .eggs/
-*.egg
 .Python
 env/
 venv/
 .venv/
+pip-log.txt
+pip-delete-this-directory.txt
 
 # IDE
 .vscode/
@@ -21,16 +23,19 @@ venv/
 *.swo
 *~
 
+# AI Assistant
+.claude/
+
 # Environment
 .env
 .env.local
 .env.*.local
 
-# Data
-data/raw/
-data/processed/
+# Data & Database
+data/
 *.db
 *.sqlite3
+*.sqlite
 
 # Logs
 logs/
@@ -39,17 +44,28 @@ logs/
 # OS
 .DS_Store
 Thumbs.db
+Desktop.ini
 
-# Jupyter
+# Jupyter / Notebooks
 .ipynb_checkpoints/
 
-# Coverage
+# Testing / Coverage
 htmlcov/
 .coverage
 .coverage.*
 coverage.xml
 *.cover
 .pytest_cache/
+.cache/
+.tox/
 
-# Mypy
+# Type checking
 .mypy_cache/
+.pytype/
+
+# Temp / Misc
+提取*
+temp/
+tmp/
+*.bak
+*.swp

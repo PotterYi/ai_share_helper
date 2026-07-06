@@ -918,6 +918,16 @@ class Database:
             ).fetchone()
             return dict(row) if row else None
 
+    def mark_wechat_analyzed(self, article_id: int) -> bool:
+        """Mark a wechat article as analyzed (卡片已推送)."""
+        with self._get_conn() as conn:
+            cursor = conn.execute(
+                "UPDATE wechat_articles SET is_analyzed = 1 WHERE id = ?",
+                (article_id,),
+            )
+            conn.commit()
+            return cursor.rowcount > 0
+
     def get_article_stock_refs(self, article_id: Optional[int] = None,
                                 days: int = 7) -> list[dict]:
         """Get stock references, optionally by article or within N days."""
