@@ -152,6 +152,73 @@ def _format_evening_analysis(analysis: dict) -> list[str]:
     return lines
 
 
+def _grade_signal(sqsm_score: str, sqsm_days: list) -> dict:
+    """Signal grading system: maps SQSM score + trend to recommendation level.
+
+    Returns:
+        dict with grade, label, level_stars, advice.
+    """
+    # Parse current score
+    try:
+        parts = sqsm_score.split("/")
+        score = int(parts[0])
+        max_score = int(parts[1]) if len(parts) > 1 else 10
+    except:
+        return {"grade": "N/A", "label": "暂无数据", "level_stars": "—", "advice": ""}
+
+    ratio = score / max_score if max_score > 0 else 0
+
+    # Check if trend is improving or declining
+    improving = False
+    declining = False
+    consecutive_high = 0
+    if len(sqsm_days) >= 2:
+        try:
+            cur = sqsm_days[0].get("score", 0)
+            prev = sqsm_days[1].get("score", 0)
+            improving = cur > prev
+            declining = cur < prev
+            # Count consecutive days >= 9
+            for d in sqsm_days:
+                if d.get("score", 0) >= 9:
+                    consecutive_high += 1
+                else:
+                    break
+        except:
+            pass
+
+    if score >= 9:
+        if consecutive_high >= 3:
+            return {"grade": "SS", "label": "★★★ 强烈关注",
+                    "level_stars": "★★★",
+                    "advice": "连续多日共振，趋势强劲，技术与基本面共振"}
+        elif improving:
+            return {"grade": "S", "label": "★★ 关注",
+                    "level_stars": "★★",
+                    "advice": "今日首次共振或评分提升，技术面转好"}
+        else:
+            return {"grade": "S", "label": "★★ 关注",
+                    "level_stars": "★★",
+                    "advice": "技术面共振中，持续跟踪"}
+    elif score >= 7:
+        if improving:
+            return {"grade": "A", "label": "★ 观察",
+                    "level_stars": "★",
+                    "advice": "接近共振区间，评分在提升，可关注等待确认"}
+        else:
+            return {"grade": "A", "label": "★ 观察",
+                    "level_stars": "★",
+                    "advice": "接近共振但尚未达标，需持续观察"}
+    elif score >= 5:
+        return {"grade": "B", "label": "观望",
+                "level_stars": "—",
+                "advice": "评分中等，暂时观望等待信号明朗"}
+    else:
+        return {"grade": "C", "label": "不推荐",
+                "level_stars": "—",
+                "advice": "评分较低，不适合当前介入"}
+
+
 def _get_sqsm_suggestion(sqsm_records_3days: list, inst_buy: float = 0, inst_sell: float = 0) -> str:
     """Determine 十全十美 trading suggestion based on sqsm trend + institutional data.
 
@@ -365,6 +432,34 @@ async def build_user_stock_report_async(user: dict, stocks: list[dict], mode: st
                 stock_item["sqsm_score"] = sqsm_info.get("sqsm_score", "-/-")
                 if sqsm_info.get("sqsm_suggestion"):
                     stock_item["sqsm_suggestion"] = sqsm_info["sqsm_suggestion"]
+
+                # Signal grading
+                sqsm_days_for_grade = sqsm_info.get("sqsm_days", [])
+                grade_info = _grade_signal(stock_item["sqsm_score"], sqsm_days_for_grade)
+                stock_item["sqsm_grade"] = grade_info.get("label", "")
+                stock_item["sqsm_grade_level"] = grade_info.get("level_stars", "")
+                stock_item["sqsm_advice"] = grade_info.get("advice", "")
+
+                # Thesis tracking: detect signal degradation
+                stock_item["thesis_status"] = ""
+                stock_item["thesis_detail"] = ""
+                if len(sqsm_days_for_grade) >= 3:
+                    try:
+                        cur_score = sqsm_days_for_grade[0].get("score", 0)
+                        prev_3day = sqsm_days_for_grade[2].get("score", 0)
+                        if cur_score < prev_3day:
+                            drop = prev_3day - cur_score
+                            stock_item["thesis_status"] = "⚠️ 信号退化"
+                            stock_item["thesis_detail"] = f"3日内评分从{prev_3day}/10降至{cur_score}/10，降幅{drop}分"
+                        elif cur_score >= 9 and prev_3day >= 9:
+                            stock_item["thesis_status"] = "✅ 信号维持"
+                            stock_item["thesis_detail"] = f"连续维持高分({cur_score}/10)，原推荐逻辑依然有效"
+                        elif cur_score >= 9 and prev_3day < 9:
+                            stock_item["thesis_status"] = "📈 信号增强"
+                            stock_item["thesis_detail"] = f"评分从{prev_3day}/10升至{cur_score}/10，逻辑加强"
+                    except:
+                        pass
+
                 # Resonance trend
                 days = sqsm_info.get("sqsm_days", [])
                 if len(days) >= 1:

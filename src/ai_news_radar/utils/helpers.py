@@ -6,7 +6,8 @@ import logging.handlers
 import re
 import sys
 from datetime import datetime, timezone
-from typing import Optional
+from decimal import Decimal, Context, ROUND_HALF_EVEN
+from typing import Optional, Union
 from urllib.parse import urlparse, urlunparse
 
 from ..config import LOGS_DIR, get_log_level
@@ -159,3 +160,43 @@ def normalize_stock_code(code: str) -> str:
         return "sh" + code
     else:
         return "sz" + code
+
+
+# ─── Decimal helpers for financial precision ─────────────────────────────────
+
+_DEC_CTX = Context(prec=28, rounding=ROUND_HALF_EVEN)
+
+
+def dec(value: Union[int, float, str, Decimal]) -> Decimal:
+    """Convert any numeric to exact Decimal, avoiding float drift."""
+    if isinstance(value, Decimal):
+        return value
+    if isinstance(value, float):
+        return Decimal(str(value))
+    return Decimal(str(value))
+
+
+def dec_market_cap(price: float, shares: float) -> Decimal:
+    """精确计算流通市值 (price * shares / 1e8)，返回亿单位。"""
+    return _DEC_CTX.multiply(dec(price), dec(shares)) / dec("100000000")
+
+
+def dec_change_pct(old_price: float, new_price: float) -> Decimal:
+    """精确计算涨跌幅百分比 (new - old) / old * 100。"""
+    if not old_price:
+        return dec("0")
+    return (_DEC_CTX.divide(dec(new_price) - dec(old_price), dec(old_price))
+            * dec("100"))
+
+
+def fmt_yi(value, suffix: str = "亿") -> str:
+    """格式化财务数据为亿单位显示。"""
+    try:
+        v = float(value) if not isinstance(value, (int, float)) else value
+        if abs(v) >= 1e8:
+            return f"{v / 1e8:.2f}{suffix}"
+        if abs(v) >= 1e4:
+            return f"{v / 1e4:.2f}万"
+        return f"{v:.2f}{suffix}"
+    except (ValueError, TypeError):
+        return str(value) if value else "-"

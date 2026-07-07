@@ -244,16 +244,35 @@ class FeishuClient:
                 price_info = f"  当前价: {price:.2f}" if price else "  暂无行情"
             elements.append({"tag": "div", "text": {"tag": "lark_md", "content": price_info}})
 
-            # 十全十美 score + trend + institutional
+            # 十全十美 score + grade + trend + institutional
             sqsm = s.get("sqsm_score", "-/-")
             sqsm_sug = s.get("sqsm_suggestion", "")
-            sqsm_line = f"  十全十美: {sqsm}"
+            grade_label = s.get("sqsm_grade", "")
+            grade_level = s.get("sqsm_grade_level", "")
+            advice = s.get("sqsm_advice", "")
+
+            sqsm_line = f"  \U0001f48e 十全十美: {sqsm}"
+            if grade_label:
+                sqsm_line += f"  |  {grade_label}"
             if sqsm_sug:
                 icon = "\U0001f7e2" if "买入" in sqsm_sug else "\U0001f534"
                 sqsm_line += f"  {icon} {sqsm_sug}"
             elements.append({"tag": "div", "text": {"tag": "lark_md", "content": sqsm_line}})
 
-            # Resonance trend (新字段1)
+            # Advice detail
+            if advice:
+                elements.append({"tag": "div", "text": {"tag": "lark_md", "content": f"  \U0001f4dd {advice}"}})
+
+            # Thesis tracking (信号论文追踪)
+            thesis_status = s.get("thesis_status", "")
+            thesis_detail = s.get("thesis_detail", "")
+            if thesis_status:
+                ts_icon = "⚠️" if "退化" in thesis_status else "✅" if "维持" in thesis_status else "📈"
+                elements.append({"tag": "div", "text": {"tag": "lark_md", "content": f"  {ts_icon} {thesis_status}"}})
+                if thesis_detail:
+                    elements.append({"tag": "div", "text": {"tag": "lark_md", "content": f"    {thesis_detail}"}})
+
+            # Resonance trend
             sqsm_trend = s.get("sqsm_trend", "")
             if sqsm_trend:
                 elements.append({"tag": "div", "text": {"tag": "lark_md", "content": f"  \U0001f4c8 {sqsm_trend}"}})
@@ -634,6 +653,23 @@ class FeishuClient:
                 lines.append(f"\U0001f4b0 市值{mcap}  |  \U0001f504 换手{trn}  |  {sqsm_display}")
                 lines.append(f"\U0001f4c8 5日累积: {ch5_str}" + (f"  (峰值 {peak_str})" if peak_str else ""))
                 lines.append(f"\U0001f3c6 {inst_label}: {inst}")
+                # PE/PB if available
+                pe = s.get("pe", 0)
+                pb = s.get("pb", 0)
+                if pe or pb:
+                    pe_str = f"PE {pe:.1f}" if pe else ""
+                    pb_str = f"PB {pb:.2f}" if pb else ""
+                    lines.append(f"\U0001f4ca {pe_str}  |  {pb_str}")
+                # Revenue/profit growth if available
+                rev = s.get("rev_growth")
+                profit = s.get("profit_growth")
+                if rev is not None or profit is not None:
+                    parts = []
+                    if rev is not None:
+                        parts.append(f"营收 {rev:+.1f}%")
+                    if profit is not None:
+                        parts.append(f"净利 {profit:+.1f}%")
+                    lines.append(f"\U0001f4c9 {'  |  '.join(parts)}")
 
                 elements.append({"tag": "div", "text": {"tag": "lark_md", "content": "\n".join(lines)}})
 
@@ -696,6 +732,21 @@ class FeishuClient:
                 lines.append(f"\U0001f4b0 市值{mcap}  |  \U0001f504 换手{trn}  |  \U0001f47b作妖:{zlzy_sig}")
                 lines.append(f"\U0001f4c8 5日累积: {ch5_str}" + (f"  (峰值 {peak_str})" if peak_str else ""))
                 lines.append(f"\U0001f3c6 机构: {inst}")
+                pe = s.get("pe", 0)
+                pb = s.get("pb", 0)
+                if pe or pb:
+                    pe_str = f"PE {pe:.1f}" if pe else ""
+                    pb_str = f"PB {pb:.2f}" if pb else ""
+                    lines.append(f"\U0001f4ca {pe_str}  |  {pb_str}")
+                rev = s.get("rev_growth")
+                profit = s.get("profit_growth")
+                if rev is not None or profit is not None:
+                    parts = []
+                    if rev is not None:
+                        parts.append(f"营收 {rev:+.1f}%")
+                    if profit is not None:
+                        parts.append(f"净利 {profit:+.1f}%")
+                    lines.append(f"\U0001f4c9 {'  |  '.join(parts)}")
 
                 elements.append({"tag": "div", "text": {"tag": "lark_md", "content": "\n".join(lines)}})
 

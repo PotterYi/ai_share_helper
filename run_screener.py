@@ -8,6 +8,7 @@ CHAT_ID = "oc_8792267760e09f7c142bb0157bcf22f0"
 _MIN_MC = 100; _MAX_MC = 1000; _MIN_5D = 7.0; _TOP_N = 10
 SQS_HELPER = os.path.join(BASE, "src", "ai_news_radar", "_sqsm_helper.py")
 SPOT_HELPER = os.path.join(BASE, "src", "ai_news_radar", "_spot_helper.py")
+ENRICHER_HELPER = os.path.join(BASE, "src", "ai_news_radar", "_enricher_helper.py")
 
 def _load_spot():
     """Load spot data via subprocess.
@@ -25,6 +26,17 @@ def _load_spot():
         return {}
     try: return json.loads(r.stdout.strip())
     except: return {}
+
+def _fetch_enrichment(code):
+    """Fetch PE/PB/52w/financial data for a stock via subprocess."""
+    r = subprocess.run([PYTHON, ENRICHER_HELPER, code], capture_output=True, text=True, timeout=60,
+                       cwd=BASE, encoding="utf-8", errors="replace")
+    if r.returncode != 0 or not r.stdout.strip():
+        return {}
+    try:
+        return json.loads(r.stdout.strip())
+    except:
+        return {}
 
 def _calc_sqsm(code):
     r = subprocess.run([PYTHON, SQS_HELPER, code], capture_output=True, text=True, timeout=60,
@@ -51,11 +63,10 @@ def _fetch_kline(code, days=10):
     except: return []
 
 def _estimate_mcap(code, price, spot_info):
-    """Estimate market cap from price * outstanding shares via Tencent API."""
+    """Estimate market cap from price * outstanding shares via Tencent API (Decimal precision)."""
     try:
         raw = code.replace("sh","").replace("sz","").replace("bj","")
         pref = "sh" if raw[0] in "651" else "sz" if raw[0] in "023" else "bj"
-        # Try to get outstanding shares from kline
         url = f"http://ifzq.gtimg.cn/appstock/app/fqkline/get?param={pref}{raw},day,,,2,qfq"
         req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
         with urllib.request.urlopen(req, timeout=10) as resp:
@@ -65,18 +76,18 @@ def _estimate_mcap(code, price, spot_info):
         if isinstance(qt, dict):
             arr = qt.get(pref + raw, [])
             if isinstance(arr, list) and len(arr) >= 74:
-                # Tencent qt array indices:
                 #   [38] = turnover rate (%)
                 #   [72] = total outstanding shares
-                #   [44] = total market cap (100M yuan, for verification)
+                #   [44] = total market cap (for verification)
+                from decimal import Decimal
                 outstanding = float(arr[72]) if arr[72] else 0
                 trn = float(arr[38]) if arr[38] else 0
                 if outstanding > 0:
-                    return price * outstanding / 100000000, trn
+                    # Decimal precision calculation
+                    mcap_dec = Decimal(str(price)) * Decimal(str(outstanding)) / Decimal("100000000")
+                    return float(mcap_dec), trn
     except: pass
-    # If we can't get shares, estimate from amount
     amount = spot_info.get("amount", 0)
-    # Amount / 10 (rough turnover) * 100 = rough mcap
     if amount > 0:
         trn_est = 10.0
         est_mcap = amount / trn_est * 100 / 100000000
@@ -161,6 +172,22 @@ async def run():
             record_signal("sqsm", s["code"], s["name"], s["price"], s.get("sqsm", ""))
         except Exception as e:
             print(f"  [dim]记录信号失败: {e}[/dim]")
+
+    # Enrich with PE/PB/financial data
+    for s in top10:
+        try:
+            enrich = _fetch_enrichment(s["code"])
+            s["pe"] = enrich.get("pe", 0)
+            s["pb"] = enrich.get("pb", 0)
+            s["high_52w"] = enrich.get("high_52w", 0)
+            s["low_52w"] = enrich.get("low_52w", 0)
+            fin_data = enrich.get("financials", {})
+            if fin_data.get("TOTALOPERATEREVETZ") is not None:
+                s["rev_growth"] = round(float(fin_data["TOTALOPERATEREVETZ"]), 1)
+            if fin_data.get("PARENTNETPROFITTZ") is not None:
+                s["profit_growth"] = round(float(fin_data["PARENTNETPROFITTZ"]), 1)
+        except Exception as e:
+            print(f"  [dim]获取增强数据失败: {e}[/dim]")
 
     from ai_news_radar.feishu_client import FeishuClient
     fc = FeishuClient()

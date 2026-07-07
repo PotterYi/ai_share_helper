@@ -10,6 +10,7 @@ CHAT_ID = "oc_8792267760e09f7c142bb0157bcf22f0"
 _MIN_5D = 7.0; _TOP_N = 10
 ZLZY_HELPER = os.path.join(BASE, "src", "ai_news_radar", "_zlzy_helper.py")
 SPOT_HELPER = os.path.join(BASE, "src", "ai_news_radar", "_spot_helper.py")
+ENRICHER_HELPER = os.path.join(BASE, "src", "ai_news_radar", "_enricher_helper.py")
 
 def _load_spot():
     env = os.environ.copy()
@@ -53,7 +54,9 @@ def _estimate_mcap(code, price, spot_info):
                 outstanding = float(arr[72]) if arr[72] else 0
                 trn = float(arr[38]) if arr[38] else 0
                 if outstanding > 0:
-                    return price * outstanding / 100000000, trn
+                    from decimal import Decimal
+                    mcap_dec = Decimal(str(price)) * Decimal(str(outstanding)) / Decimal("100000000")
+                    return float(mcap_dec), trn
     except:
         pass
     amount = spot_info.get("amount", 0)
@@ -62,6 +65,17 @@ def _estimate_mcap(code, price, spot_info):
         est_mcap = amount / trn_est * 100 / 100000000
         return est_mcap, trn_est
     return None, None
+
+def _fetch_enrichment(code):
+    """Fetch PE/PB/52w/financial data for a stock via subprocess."""
+    r = subprocess.run([PYTHON, ENRICHER_HELPER, code], capture_output=True, text=True, timeout=60,
+                       cwd=BASE, encoding="utf-8", errors="replace")
+    if r.returncode != 0 or not r.stdout.strip():
+        return {}
+    try:
+        return json.loads(r.stdout.strip())
+    except:
+        return {}
 
 def _calc_zlzy(code):
     r = subprocess.run([PYTHON, ZLZY_HELPER, code], capture_output=True, text=True, timeout=120,
@@ -156,6 +170,22 @@ async def run():
             record_signal("zlzy", s["code"], s["name"], s["price"], s.get("zlzy", ""))
         except Exception as e:
             print(f"  [dim]记录信号失败: {e}[/dim]")
+
+    # Enrich with PE/PB/financial data
+    for s in top10:
+        try:
+            enrich = _fetch_enrichment(s["code"])
+            s["pe"] = enrich.get("pe", 0)
+            s["pb"] = enrich.get("pb", 0)
+            s["high_52w"] = enrich.get("high_52w", 0)
+            s["low_52w"] = enrich.get("low_52w", 0)
+            fin_data = enrich.get("financials", {})
+            if fin_data.get("TOTALOPERATEREVETZ") is not None:
+                s["rev_growth"] = round(float(fin_data["TOTALOPERATEREVETZ"]), 1)
+            if fin_data.get("PARENTNETPROFITTZ") is not None:
+                s["profit_growth"] = round(float(fin_data["PARENTNETPROFITTZ"]), 1)
+        except Exception as e:
+            print(f"  [dim]获取增强数据失败: {e}[/dim]")
 
     from ai_news_radar.feishu_client import FeishuClient
     fc = FeishuClient()
