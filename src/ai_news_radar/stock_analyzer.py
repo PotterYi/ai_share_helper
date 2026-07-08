@@ -6,6 +6,7 @@ import asyncio
 import json
 import logging
 import re
+import sys
 from datetime import datetime, timedelta
 from typing import Optional
 
@@ -159,6 +160,31 @@ def _get_realtime_price(symbol: str) -> dict:
                 "low": low,
                 "name": str(r.get(name_col, symbol)),
             }
+    except Exception:
+        pass
+
+    # Fallback: Tencent qt.gtimg.cn API (more reliable than akshare)
+    try:
+        import subprocess, json as _json
+        import os
+        helper = os.path.join(os.path.dirname(__file__), "_enricher_helper.py")
+        env = {**os.environ, "PYTHONIOENCODING": "utf-8"}
+        r = subprocess.run(
+            [sys.executable, helper, symbol],
+            capture_output=True, timeout=30, env=env,
+        )
+        if r.returncode == 0 and r.stdout.strip():
+            data = _json.loads(r.stdout.decode("utf-8"))
+            if data.get("name") and data.get("price"):
+                return {
+                    "price": data["price"],
+                    "change_pct": 0,
+                    "high": data.get("high_52w", 0),
+                    "low": data.get("low_52w", 0),
+                    "open": 0,
+                    "pre_close": 0,
+                    "name": data["name"],
+                }
     except Exception:
         pass
 
