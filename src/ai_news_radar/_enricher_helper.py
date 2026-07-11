@@ -2,7 +2,7 @@
 Uses qt.gtimg.cn (Tencent) for PE/PB and datacenter.eastmoney.com for financials.
 NO akshare dependency.
 """
-import sys, json, urllib.request, urllib.parse, warnings, os
+import sys, json, urllib.request, urllib.parse, warnings, os, ssl
 warnings.filterwarnings("ignore")
 
 def _fetch_qq_quote(code: str) -> dict:
@@ -35,6 +35,24 @@ def _fetch_qq_quote(code: str) -> dict:
     except:
         pass
     return {}
+
+def _fetch_industry(code_clean: str, market: str) -> str:
+    """Fetch industry (BOARD_NAME) for a stock via East Money datacenter API."""
+    try:
+        url = ("https://datacenter.eastmoney.com/securities/api/data/v1/get?"
+               "reportName=RPT_LICO_FN_CPD&columns=SECURITY_CODE,SECURITY_NAME_ABBR,BOARD_NAME"
+               "&sortTypes=-1&sortColumns=SECURITY_CODE&source=HSF10&client=PC&pageNumber=1&pageSize=1"
+               "&filter=" + urllib.parse.quote(f'(SECUCODE="{code_clean}.{market}")'))
+        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+        items = data.get("result", {}).get("data", [])
+        if items:
+            return items[0].get("BOARD_NAME", "")
+    except:
+        pass
+    return ""
+
 
 def _fetch_financials(code_clean: str, market: str) -> dict:
     """Fetch fundamental financial data from East Money."""
@@ -73,6 +91,7 @@ market = "SH" if code_clean[0] in "6591" else "SZ"
 
 qq = _fetch_qq_quote(code)
 fin = _fetch_financials(code_clean, market)
+industry = _fetch_industry(code_clean, market)
 
-result = {**qq, **{"financials": fin}}
+result = {**qq, **{"financials": fin, "industry": industry}}
 print(json.dumps(result, ensure_ascii=False))

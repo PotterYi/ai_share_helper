@@ -10,6 +10,31 @@ from .database import Database
 logger = logging.getLogger(__name__)
 
 TRADING_DAYS_LIMIT = 25
+_INDUSTRY_CACHE: dict = {}
+
+
+def _fetch_industry(code: str) -> str:
+    """Fetch industry (BOARD_NAME) via East Money datacenter API with cache."""
+    cached = _INDUSTRY_CACHE.get(code)
+    if cached is not None:
+        return cached
+    raw = code.replace("sh", "").replace("sz", "").replace("bj", "")
+    market = "SH" if raw[0] in "6591" else "SZ"
+    try:
+        import urllib.parse
+        url = ("https://datacenter.eastmoney.com/securities/api/data/v1/get?"
+               "reportName=RPT_LICO_FN_CPD&columns=SECURITY_CODE,SECURITY_NAME_ABBR,BOARD_NAME"
+               "&sortTypes=-1&sortColumns=SECURITY_CODE&source=HSF10&client=PC&pageNumber=1&pageSize=1"
+               "&filter=" + urllib.parse.quote(f'(SECUCODE="{raw}.{market}")'))
+        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+        items = data.get("result", {}).get("data", [])
+        industry = items[0].get("BOARD_NAME", "") if items else ""
+    except:
+        industry = ""
+    _INDUSTRY_CACHE[code] = industry
+    return industry
 
 
 def _count_weekdays(from_date: str, to_date: str) -> int:
@@ -86,6 +111,10 @@ def get_zlzy_tracking_pool() -> dict:
             else:
                 current_price = entry_price
                 change_pct = 0.0
+
+            # Fetch industry for this stock
+            industry = _fetch_industry(sig["stock_code"])
+
             if change_pct > 0:
                 wins += 1
             else:
@@ -95,6 +124,7 @@ def get_zlzy_tracking_pool() -> dict:
             pool.append({
                 "name": sig["stock_name"],
                 "code": sig["stock_code"],
+                "industry": industry,
                 "entry_price": entry_price,
                 "current_price": current_price,
                 "change_pct": round(change_pct, 2),
