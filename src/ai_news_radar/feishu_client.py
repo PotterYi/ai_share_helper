@@ -769,6 +769,61 @@ class FeishuClient:
         content = json.dumps(card, ensure_ascii=False)
         return await self._send_raw_message(chat_id, content)
 
+    async def send_zlzy_track_card(self, chat_id: str, pool_data: dict) -> bool:
+        """Send the ZLZY tracking pool card (daily 16:00).
+
+        Args:
+            chat_id: Feishu group chat_id.
+            pool_data: Dict from zlzy_tracker.get_zlzy_tracking_pool().
+        """
+        now_str = datetime.now().strftime("%Y-%m-%d %H:%M")
+        signals = pool_data.get("signals", [])
+        total = pool_data.get("total", 0)
+        wins = pool_data.get("wins", 0)
+        losses = pool_data.get("losses", 0)
+        avg_return = pool_data.get("avg_return", 0)
+
+        elements = []
+
+        elements.append({"tag": "div", "text": {"tag": "lark_md", "content": f"**{now_str}**"}})
+        elements.append({"tag": "hr"})
+
+        elements.append({"tag": "div", "text": {"tag": "lark_md", "content": "\U0001f47b **主力捉妖跟踪池**"}})
+        elements.append({"tag": "div", "text": {"tag": "lark_md", "content": f"跟踪25个交易日  |  当前{total}只  |  胜率{wins}/{total}({round(wins/total*100,1) if total > 0 else 0}%)  |  均收益{avg_return:+.1f}%" if total > 0 else "当前无跟踪信号"}})
+        elements.append({"tag": "hr"})
+
+        if signals:
+            for i, s in enumerate(signals, 1):
+                ch = s.get("change_pct", 0)
+                peak = s.get("peak_pct", 0)
+                dd = s.get("drawdown_pct", 0)
+                ch_icon = "\U0001f7e2" if ch >= 0 else "\U0001f534"
+                lines = [
+                    f"{ch_icon} **#{i} {s['name']}** ({s['code'][-6:]})  跟踪第{s['trading_days']}天",
+                    f"  跟踪价: {s['entry_price']:.2f}  →  当前: {s['current_price']:.2f}  {ch:+.2f}%",
+                    f"  期间最高: {peak:+.2f}%  |  最大回撤: {dd:.2f}%",
+                ]
+                elements.append({"tag": "div", "text": {"tag": "lark_md", "content": "\n".join(lines)}})
+
+        elements.append({"tag": "hr"})
+        elements.append({
+            "tag": "note", "elements": [
+                {"tag": "plain_text", "content": "AI News Radar · 每个交易日16:00更新  |  跟踪25个交易日自动退出"}
+            ],
+        })
+
+        card = {
+            "config": {"wide_screen_mode": True},
+            "header": {
+                "title": {"tag": "plain_text", "content": "\U0001f47b 主力捉妖跟踪池"},
+                "template": "purple",
+            },
+            "elements": elements,
+        }
+
+        content = json.dumps(card, ensure_ascii=False)
+        return await self._send_raw_message(chat_id, content)
+
     async def send_strategy_report_card(self, chat_id: str, report_data: dict) -> bool:
         """Send a weekly strategy performance report card to group chat.
 

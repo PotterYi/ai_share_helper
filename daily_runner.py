@@ -13,6 +13,7 @@ RUN_SCREENER = os.path.join(BASE, "run_screener.py")
 RUN_ZLZY = os.path.join(BASE, "run_zlzy.py")
 RUN_STRATEGY_TRACK = os.path.join(BASE, "run_strategy_track.py")
 RUN_STRATEGY_REPORT = os.path.join(BASE, "run_strategy_report.py")
+RUN_ZLZY_TRACK = os.path.join(BASE, "run_zlzy_track.py")
 
 
 _CLEANUP_SCRIPT = (
@@ -87,6 +88,9 @@ async def main():
 
     elif task == "screener_evening":
         _run_and_check("Screener evening", [PYTHON, RUN_SCREENER, "evening"])
+
+    elif task == "zlzy_track":
+        _run_and_check("ZLZY track pool", [PYTHON, RUN_ZLZY_TRACK], timeout=600)
 
     elif task == "strategy_track":
         _run_and_check("Strategy signal tracking", [PYTHON, RUN_STRATEGY_TRACK], timeout=600)
