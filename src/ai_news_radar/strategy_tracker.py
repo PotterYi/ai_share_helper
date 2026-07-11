@@ -117,8 +117,6 @@ def get_weekly_report() -> dict:
     db = Database()
     try:
         sqsm_signals = db.get_signal_report(strategy_type="sqsm", since_days=7)
-        zlzy_signals = db.get_signal_report(strategy_type="zlzy", since_days=7)
-        all_signals = db.get_signal_report(since_days=7)
 
         # Stats
         def _calc_stats(signals: list) -> dict:
@@ -148,11 +146,9 @@ def get_weekly_report() -> dict:
             }
 
         sqsm_stats = _calc_stats(sqsm_signals)
-        zlzy_stats = _calc_stats(zlzy_signals)
-        overall = _calc_stats(all_signals)
 
         # Historical cumulative stats (all time)
-        all_time = db.get_signal_report(since_days=365)
+        all_time = db.get_signal_report(strategy_type="sqsm", since_days=365)
         history = _calc_stats(all_time)
 
         now = datetime.now()
@@ -162,11 +158,9 @@ def get_weekly_report() -> dict:
         return {
             "week_start": week_start,
             "week_end": week_end,
-            "overall": overall,
             "sqsm": sqsm_stats,
-            "zlzy": zlzy_stats,
             "history": history,
-            "all_signals": all_signals,
+            "all_signals": sqsm_signals,
         }
     finally:
         db.close()

@@ -10,15 +10,7 @@ async def run():
     from ai_news_radar.feishu_client import FeishuClient
 
     report = get_weekly_report()
-    print(f"Weekly report: {report['overall']['total']} signals total")
-    print(f"  SQSM: {report['sqsm']['total']} signals, win rate {report['sqsm']['win_rate']}%")
-    print(f"  ZLZY: {report['zlzy']['total']} signals, win rate {report['zlzy']['win_rate']}%")
-
-    # Add strategy name keys for the card
-    for s in report.get('all_signals', []):
-        s['strategy'] = s.get('strategy_type', '')
-    report['sqsm_signals'] = [s for s in report.get('all_signals', []) if s.get('strategy_type') == 'sqsm']
-    report['zlzy_signals'] = [s for s in report.get('all_signals', []) if s.get('strategy_type') == 'zlzy']
+    print(f"Weekly SQSM report: {report['sqsm']['total']} signals, win rate {report['sqsm']['win_rate']}%")
 
     fc = FeishuClient()
     if fc.is_configured:

@@ -795,13 +795,11 @@ class FeishuClient:
         if signals:
             for i, s in enumerate(signals, 1):
                 ch = s.get("change_pct", 0)
-                peak = s.get("peak_pct", 0)
-                dd = s.get("drawdown_pct", 0)
-                ch_icon = "\U0001f7e2" if ch >= 0 else "\U0001f534"
+                ch_icon = "\U0001f534" if ch >= 0 else "\U0001f7e2"
                 lines = [
                     f"{ch_icon} **#{i} {s['name']}** ({s['code'][-6:]})  跟踪第{s['trading_days']}天",
+                    f"  起始日期: {s['signal_date']}",
                     f"  跟踪价: {s['entry_price']:.2f}  →  当前: {s['current_price']:.2f}  {ch:+.2f}%",
-                    f"  期间最高: {peak:+.2f}%  |  最大回撤: {dd:.2f}%",
                 ]
                 elements.append({"tag": "div", "text": {"tag": "lark_md", "content": "\n".join(lines)}})
 
@@ -832,9 +830,7 @@ class FeishuClient:
             report_data: Dict from strategy_tracker.get_weekly_report().
         """
         now_str = datetime.now().strftime("%Y-%m-%d %H:%M")
-        overall = report_data.get("overall", {})
         sqsm = report_data.get("sqsm", {})
-        zlzy = report_data.get("zlzy", {})
         history = report_data.get("history", {})
 
         elements = []
@@ -842,22 +838,22 @@ class FeishuClient:
         elements.append({"tag": "div", "text": {"tag": "lark_md", "content": f"**{now_str}**"}})
         elements.append({"tag": "hr"})
 
-        elements.append({"tag": "div", "text": {"tag": "lark_md", "content": "\U0001f4ca **策略回测周报**"}})
+        elements.append({"tag": "div", "text": {"tag": "lark_md", "content": "\U0001f4ca **十全十美策略周报**"}})
         elements.append({"tag": "hr"})
 
-        # Overall weekly performance
-        lines = ["**\U0001f4c8 本周整体表现**"]
-        lines.append(f"新增信号: {overall.get('total', 0)} 次 (SQSM {sqsm.get('total', 0)} + ZLZY {zlzy.get('total', 0)})")
-        lines.append(f"胜率: {overall.get('win_rate', 0)}% ({overall.get('wins', 0)}/{overall.get('total', 0)} 上涨)")
-        lines.append(f"平均收益: {overall.get('avg_return', 0):+.1f}%")
-        lines.append(f"累计收益: {overall.get('total_return', 0):+.1f}%")
+        # SQSM weekly performance
+        lines = ["**\U0001f4c8 本周表现**"]
+        lines.append(f"新增信号: {sqsm.get('total', 0)} 次")
+        lines.append(f"胜率: {sqsm.get('win_rate', 0)}% ({sqsm.get('wins', 0)}/{sqsm.get('total', 0)} 上涨)")
+        lines.append(f"平均收益: {sqsm.get('avg_return', 0):+.1f}%")
+        lines.append(f"累计收益: {sqsm.get('total_return', 0):+.1f}%")
         elements.append({"tag": "div", "text": {"tag": "lark_md", "content": "\n".join(lines)}})
 
         elements.append({"tag": "hr"})
 
         # Best / Worst
-        best = overall.get("best")
-        worst = overall.get("worst")
+        best = sqsm.get("best")
+        worst = sqsm.get("worst")
         if best and best.get("name"):
             lines = ["**\U0001f3c6 本周最佳**"]
             lines.append(f"#{best['name']} ({best['code'][-6:]})  +{best['return']:+.1f}%")
@@ -866,14 +862,6 @@ class FeishuClient:
             lines = ["**\U0001f4a9 本周最差**"]
             lines.append(f"#{worst['name']} ({worst['code'][-6:]})  {worst['return']:+.1f}%")
             elements.append({"tag": "div", "text": {"tag": "lark_md", "content": "\n".join(lines)}})
-
-        elements.append({"tag": "hr"})
-
-        # Strategy breakdown
-        lines = ["**\U0001f3af 各策略表现**"]
-        lines.append(f"十全十美: {sqsm.get('total', 0)}次 | 胜率 {sqsm.get('win_rate', 0)}% | 均收益 {sqsm.get('avg_return', 0):+.1f}%")
-        lines.append(f"主力捉妖: {zlzy.get('total', 0)}次 | 胜率 {zlzy.get('win_rate', 0)}% | 均收益 {zlzy.get('avg_return', 0):+.1f}%")
-        elements.append({"tag": "div", "text": {"tag": "lark_md", "content": "\n".join(lines)}})
 
         elements.append({"tag": "hr"})
 

@@ -70,7 +70,6 @@ def get_zlzy_tracking_pool() -> dict:
                 
             entry_price = sig["price"]
 
-            # Recalculate from all tracking records for accuracy
             all_tracking = db.get_signal_tracking(sig["id"])
 
             if all_tracking:
@@ -78,24 +77,15 @@ def get_zlzy_tracking_pool() -> dict:
                 current_price = latest["price"]
                 change_pct = latest["change_pct"]
 
-                # Recalculate peak (above entry) and drawdown from all tracking data
-                peak_pct = max(0.0, max(t["peak_pct"] for t in all_tracking))
-                drawdown_pct = max(0.0, peak_pct - change_pct)
-
                 # If latest tracking is not today, fetch fresh price
                 if latest["track_date"] != today:
                     fresh = _fetch_latest_price(sig["stock_code"])
                     if fresh and abs(fresh - current_price) / max(current_price, 0.001) > 0.001:
                         current_price = fresh
                         change_pct = round((fresh - entry_price) / entry_price * 100, 2) if entry_price > 0 else 0
-                        peak_pct = max(peak_pct, change_pct)
-                        drawdown_pct = max(drawdown_pct, round(max(0.0, peak_pct - change_pct), 2))
             else:
                 current_price = entry_price
                 change_pct = 0.0
-                peak_pct = 0.0
-                drawdown_pct = 0.0
-            
             if change_pct > 0:
                 wins += 1
             else:
@@ -108,8 +98,6 @@ def get_zlzy_tracking_pool() -> dict:
                 "entry_price": entry_price,
                 "current_price": current_price,
                 "change_pct": round(change_pct, 2),
-                "peak_pct": round(peak_pct, 2),
-                "drawdown_pct": round(drawdown_pct, 2),
                 "signal_date": sig["signal_date"],
                 "trading_days": trading_days,
                 "score": sig.get("score", ""),
