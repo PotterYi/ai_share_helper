@@ -81,18 +81,18 @@ def update_daily_tracking() -> dict:
             current = quote["price"]
             change_pct = (current - signal_price) / signal_price * 100 if signal_price > 0 else 0
 
-            # Calculate peak and drawdown from existing tracking
+            # Calculate peak (above entry) and drawdown from existing tracking
             prev_tracking = db.get_signal_tracking(sig["id"])
-            peak_so_far = change_pct
-            low_so_far = change_pct
+            peak_so_far = max(0.0, change_pct)   # highest gain above entry (0 = entry baseline)
+            low_so_far = min(0.0, change_pct)    # lowest below entry
             for t in prev_tracking:
-                peak_so_far = max(peak_so_far, t["peak_pct"])
+                peak_so_far = max(peak_so_far, max(0.0, t["peak_pct"]))
                 low_so_far = min(low_so_far, t["change_pct"])
             peak_so_far = max(peak_so_far, change_pct)
             low_so_far = min(low_so_far, change_pct)
 
-            # Current drawdown: if peak > 0, how far from peak?
-            drawdown = (peak_so_far - change_pct) if peak_so_far > 0 else 0
+            # Drawdown: distance from highest peak to current (always >= 0)
+            drawdown = max(0.0, peak_so_far - change_pct)
 
             db.update_signal_tracking(
                 signal_id=sig["id"],

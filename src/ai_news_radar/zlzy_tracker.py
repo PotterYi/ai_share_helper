@@ -77,8 +77,10 @@ def get_zlzy_tracking_pool() -> dict:
                 latest = all_tracking[-1]
                 current_price = latest["price"]
                 change_pct = latest["change_pct"]
-                peak_pct = max(t["peak_pct"] for t in all_tracking)
-                drawdown_pct = max(t["drawdown_pct"] for t in all_tracking)
+
+                # Recalculate peak (above entry) and drawdown from all tracking data
+                peak_pct = max(0.0, max(t["peak_pct"] for t in all_tracking))
+                drawdown_pct = max(0.0, peak_pct - change_pct)
 
                 # If latest tracking is not today, fetch fresh price
                 if latest["track_date"] != today:
@@ -87,6 +89,7 @@ def get_zlzy_tracking_pool() -> dict:
                         current_price = fresh
                         change_pct = round((fresh - entry_price) / entry_price * 100, 2) if entry_price > 0 else 0
                         peak_pct = max(peak_pct, change_pct)
+                        drawdown_pct = max(drawdown_pct, round(max(0.0, peak_pct - change_pct), 2))
             else:
                 current_price = entry_price
                 change_pct = 0.0
