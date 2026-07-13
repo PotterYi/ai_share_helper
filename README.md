@@ -6,7 +6,7 @@ AI 驱动的 A 股扫描推荐、技术指标筛选与飞书推送系统。
 
 ## 📋 功能总览
 
-系统通过 **9 个 Windows 计划任务**自动运行，覆盖技术面选股、持仓分析、公众号跟踪、策略回测四大场景。
+系统通过 **10 个 Windows 计划任务**自动运行，覆盖技术面选股、持仓分析、策略回测、信号跟踪四大场景。
 
 | 时间 | 任务 | 功能 | 运行日 |
 |---|---|---|---|
@@ -88,7 +88,31 @@ AI 驱动的 A 股扫描推荐、技术指标筛选与飞书推送系统。
 
 ---
 
-### 3️⃣ 早间预判 & 收盘复盘（07:00 / 19:00 推送）
+### 3️⃣ 主力捉妖跟踪池（16:00 推送）
+
+每个交易日 16:00 自动更新，跟踪所有 ZLZY 信号的后续表现，**25 个交易日自动退出**。
+
+**跟踪池内容：**
+```
+👹 主力捉妖跟踪池
+跟踪25个交易日  |  当前11只  |  胜率5/11(45.5%)  |  均收益-0.38%
+
+🔴 #1 上海合晶 (688584) 半导体  跟踪第2天
+  起始日期: 2026-07-09
+  跟踪价: 40.27  →  当前: 43.38  +7.72%（涨=红色）
+
+🟢 #2 凯龙高科 (300912)  跟踪第5天
+  起始日期: 2026-07-06
+  跟踪价: 28.56  →  当前: 25.12  -12.04%（跌=绿色）
+```
+
+- 每只信号显示：所属行业、起始日期、跟踪价、当前价、涨跌幅
+- 红涨绿跌，一目了然
+- **核心代码：** `src/ai_news_radar/zlzy_tracker.py` → `run_zlzy_track.py`
+
+---
+
+### 4️⃣ 早间预判 & 收盘复盘（07:00 / 19:00 推送）
 
 基于用户持仓的个性化股票 AI 分析日报，通过飞书私聊推送给每个用户。
 
@@ -116,7 +140,7 @@ AI 驱动的 A 股扫描推荐、技术指标筛选与飞书推送系统。
 
 ---
 
-### 4️⃣ 微信公众号股票推荐跟踪（07:00 推送群聊）
+### 5️⃣ 微信公众号股票推荐跟踪（07:00 推送群聊，已暂停）
 
 每天定时检查指定公众号的最新文章，提取股票推荐并持续跟踪 15 天。
 
@@ -128,7 +152,7 @@ AI 驱动的 A 股扫描推荐、技术指标筛选与飞书推送系统。
 
 ---
 
-### 5️⃣ 用户持仓管理
+### 6️⃣ 用户持仓管理
 
 多用户股票持仓管理，通过飞书私聊 + CLI 交互。
 
@@ -150,6 +174,9 @@ ai_news_radar/
 ├── daily_runner.py              # 定时任务分发入口
 ├── run_screener.py              # 十全十美筛选脚本
 ├── run_zlzy.py                  # 主力捉妖筛选脚本
+├── run_zlzy_track.py            # 主力捉妖跟踪池推送
+├── run_strategy_track.py        # 策略信号每日更新
+├── run_strategy_report.py       # SQSM策略周报推送
 ├── create_tasks2.bat            # 一键安装计划任务
 ├── zlzy.txt                     # 通达信原公式参考
 ├── .env                         # 飞书API密钥配置
@@ -164,6 +191,9 @@ ai_news_radar/
 │   ├── zlzy_indicator.py        # 主力捉妖指标计算
 │   ├── _zlzy_helper.py          # 主力捉妖子进程
 │   ├── _spot_helper.py          # 行情数据子进程
+│   ├── _enricher_helper.py      # PE/PB/行业/财务数据子进程
+│   ├── strategy_tracker.py      # 策略信号记录+跟踪+周报
+│   ├── zlzy_tracker.py          # 主力捉妖跟踪池
 │   ├── stock_notifier.py        # 股票日报推送
 │   ├── stock_analyzer.py        # AI技术分析
 │   ├── stock_scheduler.py       # 公众号跟踪+计算调度
@@ -255,6 +285,7 @@ _zlzy_helper.py  子进程  -> 下载500天K线 + 计算主力捉妖
 | A股实时行情 | akShare + 腾讯API |
 | 历史日K线 | ifzq.gtimg.cn（纯JSON） |
 | 机构龙虎榜 | akShare |
+| 行业分类（申万） | datacenter.eastmoney.com（`RPT_LICO_FN_CPD` 接口） |
 | 公众号文章 | WeWeRSS |
 | AI分析 | DeepSeek API |
 
@@ -284,11 +315,14 @@ pip install akshare    # 用于机构净买入数据
 create_tasks2.bat
 
 # 或手动逐个创建
-schtasks /create /tn "AI_News_Radar_WeChat" /tr "python daily_runner.py wechat_track" /sc daily /st 07:00 /f
 schtasks /create /tn "AI_News_Radar_Morning" /tr "python -m ai_news_radar.cli check-stocks --mode morning" /sc weekly /d MON,TUE,WED,THU,FRI /st 07:00 /f
 schtasks /create /tn "AI_News_Radar_Evening" /tr "python -m ai_news_radar.cli check-stocks --mode evening" /sc weekly /d MON,TUE,WED,THU,FRI /st 19:00 /f
 schtasks /create /tn "AI_News_Radar_Screener_PM" /tr "python daily_runner.py screener_evening" /sc weekly /d MON,TUE,WED,THU,FRI /st 15:30 /f
 schtasks /create /tn "AI_News_Radar_ZLZY" /tr "python daily_runner.py zlzy_evening" /sc weekly /d MON,TUE,WED,THU,FRI /st 15:45 /f
+schtasks /create /tn "AI_News_Radar_ZLZY_Track" /tr "python daily_runner.py zlzy_track" /sc weekly /d MON,TUE,WED,THU,FRI /st 16:00 /f
+schtasks /create /tn "AI_News_Radar_Strategy_Track" /tr "python daily_runner.py strategy_track" /sc weekly /d MON,TUE,WED,THU,FRI /st 19:05 /f
+schtasks /create /tn "AI_News_Radar_Strategy_Report" /tr "python daily_runner.py strategy_report" /sc weekly /d SAT /st 15:00 /f
+schtasks /create /tn "AI_News_Radar_Cleanup" /tr "python daily_runner.py strategy_cleanup" /sc weekly /d SAT /st 15:15 /f
 ```
 
 > ⚠️ `python` 需替换为实际 Python 解释器绝对路径
