@@ -798,10 +798,13 @@ class FeishuClient:
                 ch_icon = "\U0001f534" if ch >= 0 else "\U0001f7e2"
                 ind = s.get("industry", "")
                 ind_str = f"  |  {ind}" if ind else ""
+                bd = s.get("best_day", 0)
+                br = s.get("best_return", 0)
+                best_str = f"  |  🏆 第{bd}天 {br:+.2f}%" if bd > 0 else ""
                 lines = [
                     f"{ch_icon} **#{i} {s['name']}** ({s['code'][-6:]}){ind_str}  跟踪第{s['trading_days']}天",
                     f"  起始日期: {s['signal_date']}",
-                    f"  跟踪价: {s['entry_price']:.2f}  →  当前: {s['current_price']:.2f}  {ch:+.2f}%",
+                    f"  跟踪价: {s['entry_price']:.2f}  →  当前: {s['current_price']:.2f}  {ch:+.2f}%{best_str}",
                 ]
                 elements.append({"tag": "div", "text": {"tag": "lark_md", "content": "\n".join(lines)}})
 

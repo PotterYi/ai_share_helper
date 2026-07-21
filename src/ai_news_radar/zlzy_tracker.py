@@ -102,15 +102,31 @@ def get_zlzy_tracking_pool() -> dict:
                 current_price = latest["price"]
                 change_pct = latest["change_pct"]
 
+                # Find best day: tracking record with highest change_pct
+                best_idx = 0
+                best_val = all_tracking[0]["change_pct"]
+                for idx, t in enumerate(all_tracking):
+                    if t["change_pct"] > best_val:
+                        best_val = t["change_pct"]
+                        best_idx = idx
+                best_day = best_idx + 1
+                best_return = round(best_val, 2)
+
                 # If latest tracking is not today, fetch fresh price
                 if latest["track_date"] != today:
                     fresh = _fetch_latest_price(sig["stock_code"])
                     if fresh and abs(fresh - current_price) / max(current_price, 0.001) > 0.001:
                         current_price = fresh
                         change_pct = round((fresh - entry_price) / entry_price * 100, 2) if entry_price > 0 else 0
+                        # Check if fresh price creates a new peak
+                        if change_pct > best_return:
+                            best_return = round(change_pct, 2)
+                            best_day = trading_days  # current trading day
             else:
                 current_price = entry_price
                 change_pct = 0.0
+                best_day = 0
+                best_return = 0.0
 
             # Fetch industry for this stock
             industry = _fetch_industry(sig["stock_code"])
@@ -131,6 +147,8 @@ def get_zlzy_tracking_pool() -> dict:
                 "signal_date": sig["signal_date"],
                 "trading_days": trading_days,
                 "score": sig.get("score", ""),
+                "best_day": best_day,
+                "best_return": best_return,
             })
         
         pool.sort(key=lambda x: x["signal_date"], reverse=True)
